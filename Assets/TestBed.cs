@@ -53,10 +53,23 @@ public class TestBed : MonoBehaviour
         }
 
         
-        
+         
     }
 
     void Initialise() {
+
+
+
+        //DebugLineDraw();
+        
+
+
+
+        
+
+    }
+
+    void DebugLineRenderer() {
         // if no focus_planet, find planet
         if (focus_planet == null) { focus_planet = FindObjectOfType<Planet>(); }
 
@@ -64,7 +77,7 @@ public class TestBed : MonoBehaviour
         if (gameObject.GetComponent<LineRenderer>() == null) { this.test_line = gameObject.AddComponent<LineRenderer>(); }
         else { this.test_line = gameObject.GetComponent<LineRenderer>(); }
         // if line renderer has no points, create points
-        
+
         startPoint.Normalize();
         endPoint.Normalize();
         startPoint *= focus_planet.radius;
@@ -80,10 +93,31 @@ public class TestBed : MonoBehaviour
             positions[i] = Vector3.Slerp(startPoint * 1.01f, endPoint * 1.01f, i / 30f);
         }
         test_line.SetPositions(positions);
+    }
 
+    void DebugLineDraw() {
+        // test globeline
+        LineDrawer line = LineDrawer.GlobeLine(Vector3.up, Vector3.right, 0.1f, Color.magenta, focus_planet);
 
+        GameObject lineMeshObj;
+        MeshFilter lineMeshFilter;
+        if (transform.Find("line_mesh") == null) {
+            lineMeshObj = new GameObject("line_mesh");         // create new GameObject with name of "planet_mesh"
+            lineMeshObj.transform.parent = transform;                       // set the parent to this object}
+            lineMeshObj.AddComponent<MeshRenderer>().sharedMaterial = new Material(line.shader);
+            lineMeshFilter = lineMeshObj.AddComponent<MeshFilter>();
+        }
+        else {
+            lineMeshObj = transform.Find("line_mesh").gameObject;
+            lineMeshFilter = lineMeshObj.GetComponent<MeshFilter>();
+        }
+
+        lineMeshFilter.sharedMesh = line.mesh;
+    }
+
+    void DebugCircleDraw() {
         // test circle
-        LineDrawer circle = LineDrawer.GlobeCircle(Vector3.up, 25f, 0.1f, Color.black, focus_planet);
+        LineDrawer circle = LineDrawer.GlobeCircle(Vector3.up, 25f, 0.1f, Color.magenta, focus_planet);
 
         GameObject meshObj;
         MeshFilter meshFilter;
@@ -99,6 +133,5 @@ public class TestBed : MonoBehaviour
         }
 
         meshFilter.sharedMesh = circle.mesh;
-        
     }
 }

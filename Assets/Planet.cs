@@ -92,7 +92,7 @@ public class Planet : MonoBehaviour
     }
 
     public Mesh[] PlanetMeshes() {
-        Debug.Log(terrainFaces);
+        //Debug.Log(terrainFaces);
         Mesh[] meshes = new Mesh[terrainFaces.Length];
         for (int i=0; i<terrainFaces.Length; i++) {
             meshes[i] = terrainFaces[i].mesh;

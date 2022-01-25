@@ -17,6 +17,8 @@ public class MantleManager : MonoBehaviour
 
     Color[] region_colors = { Color.red, Color.blue, Color.yellow, Color.magenta, Color.green, Color.cyan };
 
+    public List<MantleCellRenderer> mantleCellRenderers;
+
 
     // Runs when unity compiles the script (i.e. in edit mode, not play)
     private void OnValidate() {
@@ -31,22 +33,32 @@ public class MantleManager : MonoBehaviour
         
         planet = FindObjectOfType<Planet>();
          
-
+        
         mantleCells.Add(new MantleCell(Vector3.right, planet, 2f));
         mantleCells.Add(new MantleCell(Vector3.forward+ Vector3.up, planet, 1.5f));
         mantleCells.Add(new MantleCell(Vector3.up, planet, 0.5f));
-        mantleCells.Add(new MantleCell(new Vector3(-1f,-1f,-1f), planet, 0.5f));
+        mantleCells.Add(new MantleCell(new Vector3(-1f,-1f,-1.5f), planet, 0.5f));
+        
+
+        /*mantleCells.Add(new MantleCell(Vector3.right, planet, 1f));
+        mantleCells.Add(new MantleCell(Vector3.forward + Vector3.up, planet, 2f));
+        mantleCells.Add(new MantleCell(Vector3.up, planet, 1f));
+        mantleCells.Add(new MantleCell(new Vector3(-1f, -1f, -1.5f), planet, 1f));
+        */
+
+
 
         Mesh[] meshes = planet.PlanetMeshes();
         this.meshes = meshes;
 
         PaintInfluenceOnMeshes(meshes);
 
-        Debug.Log(GetCellStrength(mantleCells[0], new Vector3(1, 0, 1).normalized * 2f, true));
+        //Debug.Log(GetCellStrength(mantleCells[0], new Vector3(1, 0, 1).normalized * 2f, true));
 
         //draw lines
 
-        DrawCellCircles();
+        //DrawCellCircles();
+        BuildPowerDiagramBoundaries(mantleCells.ToArray());
 
     }
 
@@ -163,42 +175,86 @@ public class MantleManager : MonoBehaviour
 
         // stores triangle vertex data from the dual convex hull.
         // each three points stores a face from the dual hull - i.e. where 3 half-spaces from the mantleCells will form a point on their convex hull.
-        var cellIntersections = FindDualConvexHull(cells);
-        List<Vector3>[] cellPoints = new List<Vector3>[cells.Length];
+        int[] cellIntersections; List<Vector3> normals;
+        (cellIntersections, normals) = FindDualConvexHull(cells);
 
+        Debug.Log("Program found " + cellIntersections.Length + " intersections");
+        for (int i = 0; i < cellIntersections.Length; i++) {
+            Debug.Log("Intersection " + i + ": " + cellIntersections[i]);
+        }
+
+        List <Vector3>[] cellPoints = new List<Vector3>[cells.Length];
+        for (int i = 0; i < cells.Length;i++){ cellPoints[i] = new List<Vector3>(); }
+        
         // for each face in dual space, calculate corresponding intersection in real space, and add it to cellPoints list for each cell.
         // In principle this could error if all three points lie on a great-circle of the sphere, but for any reasonable number of regions, this won't happen.
         for (int i = 0; i< cellIntersections.Length/3; i++) {
+
+            //use cell indices to find cells joining at point.
             int c1 = cellIntersections[3 * i];
-            int c2 = cellIntersections[3 * i + 1];
+            int c2 = cellIntersections[3 * i + 1]; 
             int c3 = cellIntersections[3 * i + 2];
 
             MantleCell cell1 = cells[c1];
             MantleCell cell2 = cells[c2];
             MantleCell cell3 = cells[c3];
 
-            Plane plane1 = new Plane(cell1.PlanetPosition.normalized, cell1.PlanetPosition.magnitude / cell1.cosθ);
-            Plane plane2 = new Plane(cell2.PlanetPosition.normalized, cell2.PlanetPosition.magnitude / cell2.cosθ);
-            Plane plane3 = new Plane(cell3.PlanetPosition.normalized, cell3.PlanetPosition.magnitude / cell3.cosθ);
+            Plane plane1 = new Plane(cell1.PlanetPosition.normalized, cell1.PlanetPosition.magnitude * cell1.cosθ);
+            Plane plane2 = new Plane(cell2.PlanetPosition.normalized, cell2.PlanetPosition.magnitude * cell2.cosθ);
+            Plane plane3 = new Plane(cell3.PlanetPosition.normalized, cell3.PlanetPosition.magnitude * cell3.cosθ);
 
             Vector3 intersection;
-            PlanesIntersectAtSinglePoint(plane1, plane2, plane3, out intersection);
+            bool noError = PlanesIntersectAtSinglePoint(plane1, plane2, plane3, out intersection);
+
+            if (!noError) { Debug.LogError("Unable to find intersection point for three planes!" + plane1 + ", " + plane2 + ", " + plane3); }
+
+            // check if intersection point is on wrong side of globe (e.g. all cells on northern hemisphere still has intersections on southern hemisphere)
+            Vector3 normal = normals[3 * i];
+            if(Vector3.Dot(normal,intersection) < 0f) { intersection *= -1f; }
+
+            intersection.Normalize();
 
             cellPoints[c1].Add(intersection);
             cellPoints[c2].Add(intersection);
             cellPoints[c3].Add(intersection);
         }
 
+        for(int i = 0; i< mantleCells.Count; i++) {
+            Vector3[] boundaryVertices = cellPoints[i].ToArray();
+
+            GameObject cellObj;
+            MantleCellRenderer cellRenderer;
+
+            if (mantleCellRenderers.Count < i + 1) {
+                cellObj = new GameObject("cell_renderer");
+                
+                cellObj.transform.parent = transform;
+
+                cellRenderer = cellObj.AddComponent<MantleCellRenderer>();
+                cellRenderer.Setup(mantleCells[i], boundaryVertices);
+                mantleCellRenderers.Add(cellRenderer);
+            }
+            else {
+                cellRenderer = mantleCellRenderers[i];
+                cellRenderer.Reset(mantleCells[i], boundaryVertices);
+            }
+
+            cellRenderer.DrawCellCircle(Color.black);
+            cellRenderer.DrawCellBoundary(Color.gray);
+        }
+        
+
+
     }
 
 
-    public int[] FindDualConvexHull(MantleCell[] cells) {
+    public (int[],List<Vector3>) FindDualConvexHull(MantleCell[] cells) {
 
 
         // Create list of Dual space vertices.
         // index of dual vertex = index of its corresponding cell in cells[].
         List<Vector3> dualVertices = new List<Vector3>();
-        for (int i = 1; i < mantleCells.Count; i++) {
+        for (int i = 0; i < mantleCells.Count; i++) {
             // Pᵢ* = Pᵢ / cosθᵢ
             MantleCell cell = mantleCells[i];
             dualVertices.Add(cell.PlanetPosition / cell.cosθ);
@@ -212,7 +268,7 @@ public class MantleManager : MonoBehaviour
         
 
 
-        calc.GenerateHull(dualVertices, false, ref verts, ref tris, ref normals, ref vertMap);
+        calc.GenerateHull(dualVertices, true, ref verts, ref tris, ref normals, ref vertMap);
 
         var cellIntersections = new int[tris.Count];
 
@@ -220,7 +276,7 @@ public class MantleManager : MonoBehaviour
             cellIntersections[i] = vertMap[tris[i]];
         }
 
-        return cellIntersections;
+        return (cellIntersections,normals);
 
 
     }
@@ -241,6 +297,18 @@ public class MantleManager : MonoBehaviour
 
 
 
+    
+
+
+    /// <summary>
+    /// Returns true if the three planes connect at a point, else false.
+    /// The intersection point is output in the intersectionPoint field.
+    /// </summary>
+    /// <param name="p0"></param>
+    /// <param name="p1"></param>
+    /// <param name="p2"></param>
+    /// <param name="intersectionPoint"></param>
+    /// <returns></returns>
     private bool PlanesIntersectAtSinglePoint(Plane p0, Plane p1, Plane p2, out Vector3 intersectionPoint) {
         const float EPSILON = 1e-4f;
 
