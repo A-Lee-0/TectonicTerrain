@@ -1,12 +1,19 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using System;
+using GlobeLines;
+
+using GK;       // third party module for calculating the convex hull from a set of vertices.
 
 public class MantleManager : MonoBehaviour
 {
     public List<MantleCell> mantleCells;
     public Planet planet;
     public Mesh[] meshes;
+
+    public LineDrawer[] lines;
+    public GameObject[] lineHolders;
 
     Color[] region_colors = { Color.red, Color.blue, Color.yellow, Color.magenta, Color.green, Color.cyan };
 
@@ -23,10 +30,12 @@ public class MantleManager : MonoBehaviour
         mantleCells.Clear();
         
         planet = FindObjectOfType<Planet>();
-        
+         
 
-        mantleCells.Add(new MantleCell(Vector3.right, planet, 4000f));
-        mantleCells.Add(new MantleCell(Vector3.forward, planet, 1000f));
+        mantleCells.Add(new MantleCell(Vector3.right, planet, 2f));
+        mantleCells.Add(new MantleCell(Vector3.forward+ Vector3.up, planet, 1.5f));
+        mantleCells.Add(new MantleCell(Vector3.up, planet, 0.5f));
+        mantleCells.Add(new MantleCell(new Vector3(-1f,-1f,-1f), planet, 0.5f));
 
         Mesh[] meshes = planet.PlanetMeshes();
         this.meshes = meshes;
@@ -34,6 +43,10 @@ public class MantleManager : MonoBehaviour
         PaintInfluenceOnMeshes(meshes);
 
         Debug.Log(GetCellStrength(mantleCells[0], new Vector3(1, 0, 1).normalized * 2f, true));
+
+        //draw lines
+
+        DrawCellCircles();
 
     }
 
@@ -45,7 +58,7 @@ public class MantleManager : MonoBehaviour
             for (int i = 0; i < vert_count; i++) {
                 var vert = mesh.vertices[i];
 
-                float strongest = -1f;
+                float strongest = float.NegativeInfinity;
                 MantleCell strongest_cell;
                 // check each vertex against all cells, to see which one scores highest.
                 for (int j = 0; j < mantleCells.Count; j++) {
@@ -66,6 +79,10 @@ public class MantleManager : MonoBehaviour
     }
 
     float GetCellStrength(MantleCell cell, Vector3 pos, bool debug = false) {
+        return GetCellStrengthPowerDiagram(cell, pos, debug);
+    }
+
+    float GetCellStrengthConservedFlux(MantleCell cell, Vector3 pos, bool debug = false) {
         // The strength of a cell at a given position is just the strength of the cell divided by the perimeter of the slice through the sphere at the angule to the position.
         // I.e. the plane orthogonal to the cell's radial line that passes through the target point.
         // Can calculate using the dot product and pythagorus.
@@ -73,7 +90,7 @@ public class MantleManager : MonoBehaviour
         
 
 
-        Vector3 cell_pos = cell.Position();
+        Vector3 cell_pos = cell.PlanetPosition;
         float R = cell_pos.magnitude;
         float dot = Vector3.Dot(cell_pos, pos)/R;
 
@@ -95,6 +112,119 @@ public class MantleManager : MonoBehaviour
 
     }
 
+    float GetCellStrengthPowerDiagram(MantleCell cell, Vector3 pos, bool debug = false) {
+        // In 2D, the 'distance' of a point from a cell is defined from the euclidean distance from the cell, d, and the radius of the cell's circle, r.
+        //      D = d^2 - r^2.
+        // Note that for points within the cell's circle, this distance is negative.
+        // The region associated with the cell c_i is then the set of points for which D(c_i) < D(c_j)
+        //
+        // To extend this onto the surface of sphere, consider http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.95.3444&rep=rep1&type=pdf
+        // Running through the maths for a non-unit sphere ends up similar, but more explicit about what is an angle vs an arclength:
+        //      D = cos( θ(P,P_i) ) / cos( θ_i )
+        // where the θs are the angle from the arbitrary point, P, to the centre of circle i, P_i, and the angular size of circle i, θ_i = r_i/R.
+        // i.e instead of caring about the radius of a circle r_i, better to store the angle of a circle θ_i
+        // 0 < θ_i < π/2
+
+
+
+        //1. Find cos( θ(P,P_i) ) using dot product
+        float top = Vector3.Dot(cell.PlanetPosition.normalized, pos.normalized);
+        float bottom = cell.cosθ;
+
+        //negate, as code currently looks for a 'strength' i.e. largest wins, rather than a 'distance' i.e. smallest wins.
+        return top / bottom;
+        
+    }
+
+    public void DrawCellCircles() {
+
+
+        lines = new LineDrawer[mantleCells.Count];
+        if (lineHolders.Length < mantleCells.Count) { Array.Resize(ref lineHolders, mantleCells.Count); }
+        for (int i = 0; i < mantleCells.Count; i++) {
+            MantleCell cell = mantleCells[i];
+            LineDrawer circle = LineDrawer.GlobeCircle(cell.PlanetPosition, cell.strength, 0.1f, Color.black, cell.Planet);
+            lines[i] = circle;
+
+            MeshFilter meshFilter;
+            if (lineHolders[i] == null) {
+                lineHolders[i] = new GameObject("line_holder");
+                lineHolders[i].transform.parent = transform;
+                lineHolders[i].AddComponent<MeshRenderer>().sharedMaterial = new Material(circle.shader);
+                meshFilter = lineHolders[i].AddComponent<MeshFilter>();
+            }
+            else { meshFilter = lineHolders[i].GetComponent<MeshFilter>(); }
+            meshFilter.sharedMesh = circle.mesh;
+        }
+    }
+
+
+    public void BuildPowerDiagramBoundaries(MantleCell[] cells) {
+
+        // stores triangle vertex data from the dual convex hull.
+        // each three points stores a face from the dual hull - i.e. where 3 half-spaces from the mantleCells will form a point on their convex hull.
+        var cellIntersections = FindDualConvexHull(cells);
+        List<Vector3>[] cellPoints = new List<Vector3>[cells.Length];
+
+        // for each face in dual space, calculate corresponding intersection in real space, and add it to cellPoints list for each cell.
+        // In principle this could error if all three points lie on a great-circle of the sphere, but for any reasonable number of regions, this won't happen.
+        for (int i = 0; i< cellIntersections.Length/3; i++) {
+            int c1 = cellIntersections[3 * i];
+            int c2 = cellIntersections[3 * i + 1];
+            int c3 = cellIntersections[3 * i + 2];
+
+            MantleCell cell1 = cells[c1];
+            MantleCell cell2 = cells[c2];
+            MantleCell cell3 = cells[c3];
+
+            Plane plane1 = new Plane(cell1.PlanetPosition.normalized, cell1.PlanetPosition.magnitude / cell1.cosθ);
+            Plane plane2 = new Plane(cell2.PlanetPosition.normalized, cell2.PlanetPosition.magnitude / cell2.cosθ);
+            Plane plane3 = new Plane(cell3.PlanetPosition.normalized, cell3.PlanetPosition.magnitude / cell3.cosθ);
+
+            Vector3 intersection;
+            PlanesIntersectAtSinglePoint(plane1, plane2, plane3, out intersection);
+
+            cellPoints[c1].Add(intersection);
+            cellPoints[c2].Add(intersection);
+            cellPoints[c3].Add(intersection);
+        }
+
+    }
+
+
+    public int[] FindDualConvexHull(MantleCell[] cells) {
+
+
+        // Create list of Dual space vertices.
+        // index of dual vertex = index of its corresponding cell in cells[].
+        List<Vector3> dualVertices = new List<Vector3>();
+        for (int i = 1; i < mantleCells.Count; i++) {
+            // Pᵢ* = Pᵢ / cosθᵢ
+            MantleCell cell = mantleCells[i];
+            dualVertices.Add(cell.PlanetPosition / cell.cosθ);
+        }
+
+        var calc = new ConvexHullCalculator();
+        var verts = new List<Vector3>();
+        var vertMap = new List<int>();      // Added by ALee. For each vertex added to verts, keeps track of it's original index in dualVertices.
+        var tris = new List<int>();
+        var normals = new List<Vector3>();
+        
+
+
+        calc.GenerateHull(dualVertices, false, ref verts, ref tris, ref normals, ref vertMap);
+
+        var cellIntersections = new int[tris.Count];
+
+        for (int i = 0; i<tris.Count; i++) {
+            cellIntersections[i] = vertMap[tris[i]];
+        }
+
+        return cellIntersections;
+
+
+    }
+
 
     // Start is called before the first frame update
     void Start()
@@ -107,5 +237,24 @@ public class MantleManager : MonoBehaviour
     void Update()
     {
         
+    }
+
+
+
+    private bool PlanesIntersectAtSinglePoint(Plane p0, Plane p1, Plane p2, out Vector3 intersectionPoint) {
+        const float EPSILON = 1e-4f;
+
+        var det = Vector3.Dot(Vector3.Cross(p0.normal, p1.normal), p2.normal);
+        if (Mathf.Abs(det) < EPSILON) {
+            intersectionPoint = Vector3.zero;
+            return false;
+        }
+
+        intersectionPoint =
+            (-(p0.distance * Vector3.Cross(p1.normal, p2.normal)) -
+            (p1.distance * Vector3.Cross(p2.normal, p0.normal)) -
+            (p2.distance * Vector3.Cross(p0.normal, p1.normal))) / det;
+
+        return true;
     }
 }

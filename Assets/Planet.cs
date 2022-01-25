@@ -41,9 +41,8 @@ public class Planet : MonoBehaviour
 
     void Initialise() {
         // if no shader, find one:
-        if (shader = null) { shader = Shader.Find("Standard"); }
-
-
+        if (shader == null) { shader = Shader.Find("Particles/Standard Surface"); }
+        
         if (meshFilters == null || meshFilters.Length == 0) {
             meshFilters = new MeshFilter[6];
         }
@@ -85,6 +84,8 @@ public class Planet : MonoBehaviour
         }
         */
     }
+
+    public double Circumference => 2 * Mathf.PI * radius;
 
     public TerrainFace[] PlanetFaces() {
         return terrainFaces;

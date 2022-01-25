@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using GlobeLines;
 
 public class TestBed : MonoBehaviour
 {
@@ -14,6 +15,7 @@ public class TestBed : MonoBehaviour
 
     public int lineSegments = 30;
     LineRenderer test_line;
+    public LineDrawer test_circle;
 
     // Runs when unity compiles the script (i.e. in edit mode, not play)
     private void OnValidate() {
@@ -49,7 +51,8 @@ public class TestBed : MonoBehaviour
         for (int i=0; i< lineSegments; i++) {
             positions[i] = Vector3.Slerp(startPoint*1.01f, endPoint*1.01f, i / 30f);
         }
-        test_line.SetPositions(positions);
+
+        
         
     }
 
@@ -77,5 +80,25 @@ public class TestBed : MonoBehaviour
             positions[i] = Vector3.Slerp(startPoint * 1.01f, endPoint * 1.01f, i / 30f);
         }
         test_line.SetPositions(positions);
+
+
+        // test circle
+        LineDrawer circle = LineDrawer.GlobeCircle(Vector3.up, 25f, 0.1f, Color.black, focus_planet);
+
+        GameObject meshObj;
+        MeshFilter meshFilter;
+        if (transform.Find("circle_mesh") == null) {
+            meshObj = new GameObject("circle_mesh");         // create new GameObject with name of "planet_mesh"
+            meshObj.transform.parent = transform;                       // set the parent to this object}
+            meshObj.AddComponent<MeshRenderer>().sharedMaterial = new Material(circle.shader);
+            meshFilter = meshObj.AddComponent<MeshFilter>();
+        }
+        else {
+            meshObj = transform.Find("circle_mesh").gameObject;
+            meshFilter = meshObj.GetComponent<MeshFilter>();
+        }
+
+        meshFilter.sharedMesh = circle.mesh;
+        
     }
 }
