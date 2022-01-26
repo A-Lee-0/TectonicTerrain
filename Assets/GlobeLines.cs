@@ -23,7 +23,7 @@ namespace GlobeLines
             this.color = color;
         }
 
-        public static LineDrawer GlobeCircle(Vector3 centre, float radius, float lineWidth, Color color, Planet planet, int lineSegments = 30, float height = 0.01f) {
+        public static LineDrawer GlobeCircle(Vector3 centre, float radius, float lineWidth, Color color, Planet planet, int lineSegments = 30, float height = 0.013f) {
             Mesh newMesh = new Mesh();
 
 
@@ -165,6 +165,75 @@ namespace GlobeLines
 
             return new LineDrawer(newMesh, lineSegments, lineWidth, color, leftPoints, rightPoints, vertices);
         }
+
+
+        /// <summary>
+        /// Converts an angle in Degrees to an angle in Radians.
+        /// </summary>
+        /// <param name="angleInDegrees"></param>
+        /// <returns></returns>
+        public static float Rad(float angleInDegrees) { return angleInDegrees * Mathf.PI / 180f; }
+
+        /// <summary>
+        /// Converts an angle in Radians to an angle in Degrees.
+        /// </summary>
+        /// <param name="angleInRadians"></param>
+        /// <returns></returns>
+        public static float Deg(float angleInRadians) { return angleInRadians * 180f / Mathf.PI; }
+
+        /// <summary>
+        /// Calculates the 3D Moment for a uniform density polygon on the surface of a sphere.
+        /// Based on Don Hatch's answer here: https://stackoverflow.com/questions/19897187/locating-the-centroid-center-of-mass-of-spherical-polygons
+        /// This will be in the same direction as the 3D CoM, but differs by a factor of the area of the polygon.
+        /// 3D CoM = Moment / area
+        /// </summary>
+        /// <param name="vertices"> An array of position vectors for the polygon's corners. Should work for non-convex, but untested.</param>
+        /// <returns></returns>
+        public static Vector3 PolygonMoment(Vector3[] vertices) {
+            Vector3 moment = Vector3.zero;
+
+            Vector3 vert1;
+            Vector3 vert2;
+
+            for (int i = 0; i < vertices.Length; i++) {
+                vert1 = vertices[i];
+                vert2 = vertices[(i + 1) % vertices.Length];
+
+                moment += Vector3.Cross(vert1, vert2).normalized * Rad( Vector3.Angle(vert1, vert2) ) / 2;
+            }
+
+            return -moment;
+        }
+
+        public static float Area(Vector3[] vertices, Planet planet) {
+            // check my paper notes or programming notes photo album for the derivation.
+            if (vertices.Length < 3) { return 0f; }
+
+            float internalAngles = 0f;
+            float R = planet.radius;
+            int N = vertices.Length;
+            float angle;
+
+            for (int i = 0; i < vertices.Length; i++) {
+                Vector3 a = vertices[(i + 1) % vertices.Length];
+                Vector3 b = vertices[(i) % vertices.Length];
+                Vector3 c = vertices[(i + 2) % vertices.Length];
+
+                b *= a.magnitude * a.magnitude / Vector3.Dot(a, b);
+                c *= a.magnitude * a.magnitude / Vector3.Dot(a, c);
+
+                b -= a; // b.Normalize();
+                c -= a; // c.Normalize();
+
+                angle = Vector3.Angle(b, c);
+                Debug.Log("Angle for vertex " + i + " of cell is: " + angle + " deg.");
+                internalAngles += Rad(Vector3.Angle(b, c));
+            }
+
+
+            return R * R * (internalAngles - Mathf.PI * (N - 2));
+        }
+
     }
 
 

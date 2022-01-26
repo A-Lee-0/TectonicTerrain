@@ -16,7 +16,7 @@ public class MantleCellRenderer : MonoBehaviour
     /// <summary>
     /// Array of vertices comprising the boundary of the MantleCell.
     /// </summary>
-    Vector3[] vertices;
+    public Vector3[] vertices;
     /// <summary>
     /// Array of MantleCells sharing a boundary with this MantleCell.
     /// </summary>
@@ -25,13 +25,13 @@ public class MantleCellRenderer : MonoBehaviour
     GameObject circleHolder;
     GameObject lineHolder;
 
-/*    public MantleCellRenderer(MantleCell cell, Vector3[] boundaryVertices) {
-        this.cell = cell;
-        this.vertices = boundaryVertices;
+    /*    public MantleCellRenderer(MantleCell cell, Vector3[] boundaryVertices) {
+            this.cell = cell;
+            this.vertices = boundaryVertices;
 
-        
 
-    }*/
+
+        }*/
 
     public void Setup(MantleCell cell, Vector3[] boundaryVertices) {
         this.cell = cell;
@@ -42,6 +42,12 @@ public class MantleCellRenderer : MonoBehaviour
         this.cell = cell;
         this.vertices = SortClockwise(boundaryVertices);
     }
+
+    public MantleCell Cell => cell;
+    public Vector3[] Vertices => vertices;
+    public GameObject LineHolder => lineHolder;
+    public GameObject CircleHolder => circleHolder;
+
 
     public void DrawCellCircle(Color color, float width = 0.1f) {
 
@@ -67,7 +73,7 @@ public class MantleCellRenderer : MonoBehaviour
         MeshFilter meshFilter;
 
         Mesh fullMesh = new Mesh();
-        
+
         List<Vector3> meshVertices = new List<Vector3>();
         List<int> meshTriangles = new List<int>();
         List<Color> meshColors = new List<Color>();
@@ -82,25 +88,25 @@ public class MantleCellRenderer : MonoBehaviour
 
         for (int i = 0; i < vertices.Length; i++) {
             Vector3 thisVert = vertices[i];
-            Vector3 nextVert = vertices[(i+1)% vertices.Length];
+            Vector3 nextVert = vertices[(i + 1) % vertices.Length];
 
             line = LineDrawer.GlobeLine(thisVert, nextVert, width, color, cell.Planet);
 
+
+            // TODO: consider replacing this junk with the Mesh.CombineMeshes() method.
+
             int prevVerts = meshVertices.Count;
             int[] tris = line.mesh.triangles;
-            //tris[0] += 100;
-            Debug.Log("Test array 0: " + tris[0]);
+
             meshVertices.AddRange(line.mesh.vertices);
-            for(int j = 0; j < tris.Length; j++) {
+            for (int j = 0; j < tris.Length; j++) {
                 tris[j] += prevVerts;
             }
-            Debug.Log("t1: " + tris[0]);
 
             meshTriangles.AddRange(tris);
             meshColors.AddRange(line.mesh.colors);
             lineHolder.GetComponent<MeshRenderer>().sharedMaterial = new Material(line.shader);
 
-            Debug.Log("Num Vertices: " + meshVertices.Count);
         }
 
         fullMesh.vertices = meshVertices.ToArray();
@@ -145,5 +151,8 @@ public class MantleCellRenderer : MonoBehaviour
         return boundaryVertices;
 
     }
+
+    public float Area => LineDrawer.Area(vertices, cell.Planet);
+
 
 }

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using System;
+using System.Linq;
 using GlobeLines;
 
 using GK;       // third party module for calculating the convex hull from a set of vertices.
@@ -13,7 +14,9 @@ public class MantleManager : MonoBehaviour
     public Mesh[] meshes;
 
     public LineDrawer[] lines;
-    public GameObject[] lineHolders;
+
+    public GameObject lineHolder;
+    
 
     Color[] region_colors = { Color.red, Color.blue, Color.yellow, Color.magenta, Color.green, Color.cyan };
 
@@ -28,16 +31,25 @@ public class MantleManager : MonoBehaviour
     }
 
     public void DebugSetup() {
+        DateTime t0 = DateTime.Now;
+
         if (mantleCells == null) { mantleCells = new List<MantleCell>(); }
         mantleCells.Clear();
         
         planet = FindObjectOfType<Planet>();
-         
-        
-        mantleCells.Add(new MantleCell(Vector3.right, planet, 2f));
+
+        /*
+        mantleCells.Add(new MantleCell(Vector3.right, planet, 2f)); 
         mantleCells.Add(new MantleCell(Vector3.forward+ Vector3.up, planet, 1.5f));
         mantleCells.Add(new MantleCell(Vector3.up, planet, 0.5f));
         mantleCells.Add(new MantleCell(new Vector3(-1f,-1f,-1.5f), planet, 0.5f));
+        */
+
+        UnityEngine.Random.InitState(123); 
+
+        foreach (int i in Enumerable.Range(0, 20)) {
+            mantleCells.Add(new MantleCell(UnityEngine.Random.onUnitSphere,planet,UnityEngine.Random.Range(0f,1f)));
+        }
         
 
         /*mantleCells.Add(new MantleCell(Vector3.right, planet, 1f));
@@ -51,7 +63,9 @@ public class MantleManager : MonoBehaviour
         Mesh[] meshes = planet.PlanetMeshes();
         this.meshes = meshes;
 
+        DateTime t1 = DateTime.Now;
         PaintInfluenceOnMeshes(meshes);
+        DateTime t2 = DateTime.Now;
 
         //Debug.Log(GetCellStrength(mantleCells[0], new Vector3(1, 0, 1).normalized * 2f, true));
 
@@ -59,7 +73,58 @@ public class MantleManager : MonoBehaviour
 
         //DrawCellCircles();
         BuildPowerDiagramBoundaries(mantleCells.ToArray());
+        DateTime t3 = DateTime.Now;
 
+        // Draw lines from each circle to their 'CoM'
+        List<LineDrawer> lines = new List<LineDrawer>();
+        foreach (var renderer in mantleCellRenderers) {
+            if (renderer.vertices.Length > 0) {
+                var cell = renderer.Cell;
+                Vector3 centroid = LineDrawer.PolygonMoment(renderer.Vertices).normalized * cell.Planet.radius;
+
+                var newLine = LineDrawer.GlobeLine(cell.PlanetPosition, centroid, 0.02f, Color.white, cell.Planet);
+                lines.Add(newLine);
+            }
+        }
+
+        MeshFilter meshFilter;
+        if (lineHolder == null) {
+            lineHolder = new GameObject("line_holder");
+            lineHolder.transform.parent = transform;
+            lineHolder.AddComponent<MeshRenderer>().sharedMaterial = new Material(lines[0].shader);
+            meshFilter = lineHolder.AddComponent<MeshFilter>();
+        }
+        else { meshFilter = lineHolder.GetComponent<MeshFilter>(); }
+
+        CombineInstance[] meshArray = new CombineInstance[lines.Count];
+        for (int i = 0; i < lines.Count; i++) {
+            meshArray[i].mesh = lines[i].mesh;
+            meshArray[i].transform = transform.localToWorldMatrix;
+        }
+        Mesh newMesh = new Mesh();
+        newMesh.CombineMeshes(meshArray);
+        meshFilter.sharedMesh = newMesh;
+
+
+
+
+        Debug.Log("Time 0 -> 1: " + (t1 - t0));
+        Debug.Log("Time 1 -> 2: " + (t2 - t1)); //at 20 cells, this is ~.146s
+        Debug.Log("Time 2 -> 3: " + (t3 - t2)); //at 20 cells, this is ~.105s
+
+        MantleCellRenderer tempRenderer;
+        float netArea = 0f;
+        float area;
+        
+        for (int i = 0; i < mantleCellRenderers.Count; i++) {
+            tempRenderer = mantleCellRenderers[i];
+            area = tempRenderer.Area;
+            Debug.Log("cell area " + i + " = " + area + ". Vertices: " + tempRenderer.vertices.Length);
+            netArea += area;
+        }        
+
+        Debug.Log("Net cell area = " + netArea);
+        //power diagrams is already faster than the brute force colour map, though I'm not yet building the mesh for each region
     }
 
 
@@ -148,7 +213,10 @@ public class MantleManager : MonoBehaviour
         
     }
 
-    public void DrawCellCircles() {
+
+    // Obsolete code - this has been moved to the MantleCellRenderer class.
+/*    public GameObject[] lineHolders;
+      public void DrawCellCircles() {
 
 
         lines = new LineDrawer[mantleCells.Count];
@@ -169,6 +237,7 @@ public class MantleManager : MonoBehaviour
             meshFilter.sharedMesh = circle.mesh;
         }
     }
+*/
 
 
     public void BuildPowerDiagramBoundaries(MantleCell[] cells) {
@@ -178,10 +247,11 @@ public class MantleManager : MonoBehaviour
         int[] cellIntersections; List<Vector3> normals;
         (cellIntersections, normals) = FindDualConvexHull(cells);
 
+        /*
         Debug.Log("Program found " + cellIntersections.Length + " intersections");
         for (int i = 0; i < cellIntersections.Length; i++) {
             Debug.Log("Intersection " + i + ": " + cellIntersections[i]);
-        }
+        }*/
 
         List <Vector3>[] cellPoints = new List<Vector3>[cells.Length];
         for (int i = 0; i < cells.Length;i++){ cellPoints[i] = new List<Vector3>(); }
