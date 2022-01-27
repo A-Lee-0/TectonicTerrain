@@ -11,16 +11,17 @@ public class MantleManager : MonoBehaviour
 {
     public List<MantleCell> mantleCells;
     public Planet planet;
-    public Mesh[] meshes;
 
     public LineDrawer[] lines;
+    public List<LineDrawer> dirLines = new List<LineDrawer>();
+
 
     public GameObject lineHolder;
     
 
     Color[] region_colors = { Color.red, Color.blue, Color.yellow, Color.magenta, Color.green, Color.cyan };
 
-    public List<MantleCellRenderer> mantleCellRenderers;
+    //public List<MantleCellRenderer> mantleCellRenderers;
 
 
     // Runs when unity compiles the script (i.e. in edit mode, not play)
@@ -29,6 +30,7 @@ public class MantleManager : MonoBehaviour
         // having nullreference exceptions running it here - call it from planet instead.
         //DebugSetup();
     }
+
 
     public void DebugSetup() {
         DateTime t0 = DateTime.Now;
@@ -50,7 +52,6 @@ public class MantleManager : MonoBehaviour
         foreach (int i in Enumerable.Range(0, 20)) {
             mantleCells.Add(new MantleCell(UnityEngine.Random.onUnitSphere,planet,UnityEngine.Random.Range(0f,1f)));
         }
-        
 
         /*mantleCells.Add(new MantleCell(Vector3.right, planet, 1f));
         mantleCells.Add(new MantleCell(Vector3.forward + Vector3.up, planet, 2f));
@@ -60,11 +61,11 @@ public class MantleManager : MonoBehaviour
 
 
 
-        Mesh[] meshes = planet.PlanetMeshes();
-        this.meshes = meshes;
+        //Mesh[] meshes = planet.PlanetMeshes();
+        //this.meshes = meshes;
 
         DateTime t1 = DateTime.Now;
-        PaintInfluenceOnMeshes(meshes);
+        //PaintInfluenceOnMeshes(meshes);
         DateTime t2 = DateTime.Now;
 
         //Debug.Log(GetCellStrength(mantleCells[0], new Vector3(1, 0, 1).normalized * 2f, true));
@@ -76,55 +77,84 @@ public class MantleManager : MonoBehaviour
         DateTime t3 = DateTime.Now;
 
         // Draw lines from each circle to their 'CoM'
-        List<LineDrawer> lines = new List<LineDrawer>();
-        foreach (var renderer in mantleCellRenderers) {
-            if (renderer.vertices.Length > 0) {
-                var cell = renderer.Cell;
-                Vector3 centroid = LineDrawer.PolygonMoment(renderer.Vertices).normalized * cell.Planet.radius;
+        DrawLinesToCoM(mantleCells);
 
-                var newLine = LineDrawer.GlobeLine(cell.PlanetPosition, centroid, 0.02f, Color.white, cell.Planet);
-                lines.Add(newLine);
+        /*
+        foreach (var cell in mantleCells) {
+            cell.CalculateCentroid();
+            cell.CalculateArea();
+            if (cell.HasRegion) {
+                var newLine = LineDrawer.NewGlobeLine(cell.PlanetPosition, cell.Centroid, 0.02f, Color.white, cell.Planet);
+                dirLines.Add(newLine);
             }
         }
 
-        MeshFilter meshFilter;
-        if (lineHolder == null) {
-            lineHolder = new GameObject("line_holder");
-            lineHolder.transform.parent = transform;
-            lineHolder.AddComponent<MeshRenderer>().sharedMaterial = new Material(lines[0].shader);
-            meshFilter = lineHolder.AddComponent<MeshFilter>();
-        }
-        else { meshFilter = lineHolder.GetComponent<MeshFilter>(); }
+        if (lineHolder == null) { LineDrawer.GetLineHolder(this.gameObject, "line_holder"); }
+        MeshFilter meshFilter = lineHolder.GetComponent<MeshFilter>();
 
-        CombineInstance[] meshArray = new CombineInstance[lines.Count];
-        for (int i = 0; i < lines.Count; i++) {
+        CombineInstance[] meshArray = new CombineInstance[dirLines.Count];
+        for (int i = 0; i < dirLines.Count; i++) {
             meshArray[i].mesh = lines[i].mesh;
             meshArray[i].transform = transform.localToWorldMatrix;
         }
-        Mesh newMesh = new Mesh();
-        newMesh.CombineMeshes(meshArray);
-        meshFilter.sharedMesh = newMesh;
+
+        meshFilter.sharedMesh.Clear(); 
+        meshFilter.sharedMesh.CombineMeshes(meshArray);
+        */
+
+       
+
+        //debug Spherical Triangle Drawing:
+        var testCell = mantleCells[10];
+        testCell.Renderer.MakeMesh(10);
+    }
+
+
+    /// <summary>
+    /// Using this instead of the Unity Update() method, as it allows me to control when in the update cycle it is triggered.
+    /// 1a. Moves all MantleCells towards their region CoM, and changes radius depending on it's current area.
+    ///  b. Moves MantleCells without a region to a new location.
+    /// 2.  Recalculates the boundary lines for each MantleCell.
+    /// </summary>
+    public void DoUpdate() {
+
+        // 1a. Moves all MantleCells towards their region CoM, and changes radius depending on it's current area.
+        float areaOverreach = 1f;
+        float dirFactor = -0.05f;
+        foreach (var cell in mantleCells) {
+            if (cell.HasRegion) {
+                cell.SetPosition(Vector3.SlerpUnclamped(cell.PlanetPosition, cell.Centroid, dirFactor * 0.1f));
+                cell.SetStrength(Mathf.Lerp(cell.strength, areaOverreach * Mathf.Sqrt(cell.Area / Mathf.PI), 0.1f));
+            }
+            //  b. Moves MantleCells without a region to a new location.
+            else {
+                Debug.Log("Relocating cell!");
+                cell.SetPosition(UnityEngine.Random.onUnitSphere * cell.Planet.radius);
+                cell.SetStrength(0.01f);
+            }
+        }
+
+        // 2.  Recalculates the boundary lines for each MantleCell.
+        //PaintInfluenceOnMeshes(meshes); // temp - wants to be replaced by cell meshes eventually!
+        BuildPowerDiagramBoundaries(mantleCells.ToArray());
 
 
 
+        // Draw lines from each circle to their 'CoM'
+        DrawLinesToCoM(mantleCells);
 
-        Debug.Log("Time 0 -> 1: " + (t1 - t0));
-        Debug.Log("Time 1 -> 2: " + (t2 - t1)); //at 20 cells, this is ~.146s
-        Debug.Log("Time 2 -> 3: " + (t3 - t2)); //at 20 cells, this is ~.105s
 
-        MantleCellRenderer tempRenderer;
-        float netArea = 0f;
-        float area;
-        
-        for (int i = 0; i < mantleCellRenderers.Count; i++) {
-            tempRenderer = mantleCellRenderers[i];
-            area = tempRenderer.Area;
-            Debug.Log("cell area " + i + " = " + area + ". Vertices: " + tempRenderer.vertices.Length);
-            netArea += area;
-        }        
 
-        Debug.Log("Net cell area = " + netArea);
-        //power diagrams is already faster than the brute force colour map, though I'm not yet building the mesh for each region
+        // Make surface meshes for each cell
+        int surfaceResolution = 10; 
+        foreach (var cell in mantleCells) {
+            cell.Renderer.MakeMesh(surfaceResolution);
+        }
+
+        for (int i = 0; i < mantleCells.Count; i++) {
+            mantleCells[i].Renderer.SetMeshColor(region_colors[i % region_colors.Length]);
+        }
+
     }
 
 
@@ -209,39 +239,45 @@ public class MantleManager : MonoBehaviour
         float bottom = cell.cosθ;
 
         //negate, as code currently looks for a 'strength' i.e. largest wins, rather than a 'distance' i.e. smallest wins.
+        // for some reason it doesn't want the negation? don't quite understand why tbh...
         return top / bottom;
         
     }
 
+    public void DrawLinesToCoM(List<MantleCell> cells) {
+        int regions = 0;
+        for (int i = 0; i < cells.Count; i++) {
+            var cell = cells[i];
+            cell.CalculateCentroid();
+            cell.CalculateArea();
+            if (cell.HasRegion) {
+                regions++;
 
-    // Obsolete code - this has been moved to the MantleCellRenderer class.
-/*    public GameObject[] lineHolders;
-      public void DrawCellCircles() {
-
-
-        lines = new LineDrawer[mantleCells.Count];
-        if (lineHolders.Length < mantleCells.Count) { Array.Resize(ref lineHolders, mantleCells.Count); }
-        for (int i = 0; i < mantleCells.Count; i++) {
-            MantleCell cell = mantleCells[i];
-            LineDrawer circle = LineDrawer.GlobeCircle(cell.PlanetPosition, cell.strength, 0.1f, Color.black, cell.Planet);
-            lines[i] = circle;
-
-            MeshFilter meshFilter;
-            if (lineHolders[i] == null) {
-                lineHolders[i] = new GameObject("line_holder");
-                lineHolders[i].transform.parent = transform;
-                lineHolders[i].AddComponent<MeshRenderer>().sharedMaterial = new Material(circle.shader);
-                meshFilter = lineHolders[i].AddComponent<MeshFilter>();
+                // Find or Make LineDrawers for each cell with a region.
+                if (regions <= dirLines.Count) {
+                    dirLines[regions - 1].GlobeLine(cell.PlanetPosition, cell.Centroid, 0.02f, Color.white, cell.Planet);
+                }
+                else { dirLines.Add(LineDrawer.NewGlobeLine(cell.PlanetPosition, cell.Centroid, 0.02f, Color.white, cell.Planet)); }
             }
-            else { meshFilter = lineHolders[i].GetComponent<MeshFilter>(); }
-            meshFilter.sharedMesh = circle.mesh;
         }
-    }
-*/
 
+
+        if (lineHolder == null) { lineHolder = LineDrawer.GetLineHolder(this.gameObject, "line_holder"); }
+        MeshFilter meshFilter = lineHolder.GetComponent<MeshFilter>(); 
+
+        CombineInstance[] meshArray = new CombineInstance[regions];
+        for (int i = 0; i < regions; i++) {
+            meshArray[i].mesh = dirLines[i].mesh;
+            meshArray[i].transform = transform.localToWorldMatrix;
+        }
+
+        if (meshFilter.sharedMesh == null) { meshFilter.sharedMesh = new Mesh(); }
+        else { meshFilter.sharedMesh.Clear(); }
+        meshFilter.sharedMesh.CombineMeshes(meshArray);
+    }
 
     public void BuildPowerDiagramBoundaries(MantleCell[] cells) {
-
+        // http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.95.3444&rep=rep1&type=pdf
         // stores triangle vertex data from the dual convex hull.
         // each three points stores a face from the dual hull - i.e. where 3 half-spaces from the mantleCells will form a point on their convex hull.
         int[] cellIntersections; List<Vector3> normals;
@@ -289,34 +325,48 @@ public class MantleManager : MonoBehaviour
             cellPoints[c3].Add(intersection);
         }
 
-        for(int i = 0; i< mantleCells.Count; i++) {
+        // Need this section to handle orphaned mantleCellRenderers from the onValidate calls.
+        // Wasn't a problem when MantleManager held its own list of the Renderers, but trying to move away from that.
+        MantleCellRenderer[] renderers = FindObjectsOfType<MantleCellRenderer>();
+        List<MantleCellRenderer> unassignedRenderers = new List<MantleCellRenderer>();
+        foreach (var renderer in renderers) {
+            if (mantleCells.Contains(renderer.Cell)){ renderer.Cell.SetRenderer(renderer); }
+            else { unassignedRenderers.Add(renderer); }
+        }
+
+        MantleCell cell;
+        for (int i = 0; i < mantleCells.Count; i++) {
+            cell = mantleCells[i];
             Vector3[] boundaryVertices = cellPoints[i].ToArray();
 
-            GameObject cellObj;
-            MantleCellRenderer cellRenderer;
 
-            if (mantleCellRenderers.Count < i + 1) {
-                cellObj = new GameObject("cell_renderer");
-                
-                cellObj.transform.parent = transform;
+            if (!cell.HasRenderer) {
+                if (unassignedRenderers.Count > 0) {
+                    Debug.Log("Reassigning Renderer");
+                    cell.SetRenderer(unassignedRenderers[0]);
+                    cell.Renderer.Reset(mantleCells[i], boundaryVertices);
 
-                cellRenderer = cellObj.AddComponent<MantleCellRenderer>();
-                cellRenderer.Setup(mantleCells[i], boundaryVertices);
-                mantleCellRenderers.Add(cellRenderer);
+                    unassignedRenderers.RemoveAt(0);
+                }
+                else {
+                    Debug.Log("Creating new cell_renderer for cell " + i);
+                    GameObject cellObj = new GameObject("cell_renderer");
+                    cellObj.transform.parent = transform;
+
+                    MantleCellRenderer cellRenderer = cellObj.AddComponent<MantleCellRenderer>();
+                    cellRenderer.Setup(mantleCells[i], boundaryVertices);
+                }
             }
             else {
-                cellRenderer = mantleCellRenderers[i];
-                cellRenderer.Reset(mantleCells[i], boundaryVertices);
+                cell.Renderer.Reset(mantleCells[i], boundaryVertices);
             }
 
-            cellRenderer.DrawCellCircle(Color.black);
-            cellRenderer.DrawCellBoundary(Color.gray);
+            cell.Renderer.DrawCellCircle(Color.black,0.03f);
+            cell.Renderer.DrawCellBoundary(Color.gray,0.03f);
         }
-        
 
 
     }
-
 
     public (int[],List<Vector3>) FindDualConvexHull(MantleCell[] cells) {
 

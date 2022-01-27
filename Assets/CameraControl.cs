@@ -19,7 +19,7 @@ public class CameraControl : MonoBehaviour
     float rmin;
 
     public float vmax_time = 2f;
-    public float stop_time = 0.5f;
+    public float stop_time_const = 0.05f;
 
     public float v_theta;
     public float v_phi;
@@ -59,9 +59,9 @@ public class CameraControl : MonoBehaviour
         float zInput = Input.GetAxis("Mouse ScrollWheel");
 
         if (Mathf.Abs(xInput) > 0.01f) { v_theta += xInput * vmax_theta * dT / vmax_time; }
-        else { v_theta = Mathf.Lerp(v_theta, 0, stop_time); }       // Note this is actually going to be an exponential drop rather than going to 0 in stop_time.
+        else { v_theta = Mathf.Lerp(v_theta, 0, stop_time_const); }       // Note this is actually going to be an exponential drop rather than going to 0 in stop_time.
         if (Mathf.Abs(yInput) > 0.01f) { v_phi += yInput * vmax_theta * dT / vmax_time; }
-        else { v_phi = Mathf.Lerp(v_phi, 0, stop_time); }
+        else { v_phi = Mathf.Lerp(v_phi, 0, stop_time_const); }
 
         pos_r += zInput;
 

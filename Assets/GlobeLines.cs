@@ -10,23 +10,21 @@ namespace GlobeLines
         public int lineSegments;
         public float width;
         public Color color;
-        public Shader shader = Shader.Find("Particles/Standard Surface");
+        public static Shader shader = Shader.Find("Particles/Standard Surface");
+        public static Material material = new Material(shader); 
 
         int[] innerPoints;
         int[] outerPoints;
         Vector3[] verts;
 
-        public LineDrawer(Mesh mesh, int lineSegments, float width, Color color, int[] innerPoints, int[] outerPoints, Vector3[] verts) {
+        public LineDrawer(Mesh mesh, int lineSegments, float width, Color color) {
             this.mesh = mesh;
             this.lineSegments = lineSegments;
             this.width = width;
             this.color = color;
         }
 
-        public static LineDrawer GlobeCircle(Vector3 centre, float radius, float lineWidth, Color color, Planet planet, int lineSegments = 30, float height = 0.013f) {
-            Mesh newMesh = new Mesh();
-
-
+        public Mesh GlobeCircle(Vector3 centre, float radius, float lineWidth, Color color, Planet planet, int lineSegments = 30, float height = 0.013f) {
             Vector3[] vertices = new Vector3[lineSegments * 2];
             int[] triangles = new int[lineSegments * 2 * 3];
             int triIndex = 0;
@@ -92,20 +90,26 @@ namespace GlobeLines
             triangles[triIndex + 4] = 1;
             triangles[triIndex + 5] = 0;
 
-            newMesh.Clear();
-            newMesh.vertices = vertices;
-            newMesh.triangles = triangles;
-            //mesh.RecalculateNormals();
-            newMesh.normals = vertices;
-            newMesh.colors = pointColors;
+            mesh.Clear();
+            mesh.vertices = vertices;
+            mesh.triangles = triangles;
+            mesh.normals = vertices;
+            mesh.colors = pointColors;
 
+            return mesh;
+        }
 
-            return new LineDrawer(newMesh, lineSegments, lineWidth, color, innerPoints, outerPoints, vertices);
+        public static LineDrawer NewGlobeCircle(Vector3 centre, float radius, float lineWidth, Color color, Planet planet, int lineSegments = 30, float height = 0.013f) {
+            Mesh newMesh = new Mesh();
+
+            LineDrawer newCircle = new LineDrawer(newMesh, lineSegments, lineWidth, color);
+            newCircle.GlobeCircle(centre, radius, lineWidth, color, planet, lineSegments, height);
+
+            return newCircle;
         }
 
 
-        public static LineDrawer GlobeLine(Vector3 startPoint, Vector3 endPoint, float lineWidth, Color color, Planet planet, int lineSegments = 30, float height = 0.01f) {
-            Mesh newMesh = new Mesh();
+        public Mesh GlobeLine(Vector3 startPoint, Vector3 endPoint, float lineWidth, Color color, Planet planet, int lineSegments = 30, float height = 0.01f) {
             Vector3[] vertices = new Vector3[lineSegments * 2 + 2];
             int[] triangles = new int[lineSegments * 2 * 3];
             int triIndex = 0;
@@ -149,30 +153,35 @@ namespace GlobeLines
                 triangles[triIndex + 5] = 2 * i + 2;
 
                 triIndex += 6;
-
             }
 
+            mesh.Clear();
+            mesh.vertices = vertices;
+            mesh.triangles = triangles;
+            mesh.normals = vertices;
+            mesh.colors = pointColors;
 
-
-
-            newMesh.Clear();
-            newMesh.vertices = vertices;
-            newMesh.triangles = triangles;
-            //mesh.RecalculateNormals();
-            newMesh.normals = vertices;
-            newMesh.colors = pointColors;
-
-
-            return new LineDrawer(newMesh, lineSegments, lineWidth, color, leftPoints, rightPoints, vertices);
+            return mesh;
         }
 
+        public static LineDrawer NewGlobeLine(Vector3 startPoint, Vector3 endPoint, float lineWidth, Color color, Planet planet, int lineSegments = 30, float height = 0.01f) {
+            Mesh newMesh = new Mesh();
 
-        /// <summary>
-        /// Converts an angle in Degrees to an angle in Radians.
-        /// </summary>
-        /// <param name="angleInDegrees"></param>
-        /// <returns></returns>
-        public static float Rad(float angleInDegrees) { return angleInDegrees * Mathf.PI / 180f; }
+            LineDrawer newLine = new LineDrawer(newMesh, lineSegments, lineWidth, color);
+            newLine.GlobeLine(startPoint, endPoint, lineWidth, color, planet, lineSegments, height);
+
+            return newLine;
+        }
+
+    
+
+
+    /// <summary>
+    /// Converts an angle in Degrees to an angle in Radians.
+    /// </summary>
+    /// <param name="angleInDegrees"></param>
+    /// <returns></returns>
+    public static float Rad(float angleInDegrees) { return angleInDegrees * Mathf.PI / 180f; }
 
         /// <summary>
         /// Converts an angle in Radians to an angle in Degrees.
@@ -226,12 +235,25 @@ namespace GlobeLines
                 c -= a; // c.Normalize();
 
                 angle = Vector3.Angle(b, c);
-                Debug.Log("Angle for vertex " + i + " of cell is: " + angle + " deg.");
+                //Debug.Log("Angle for vertex " + i + " of cell is: " + angle + " deg.");
                 internalAngles += Rad(Vector3.Angle(b, c));
             }
 
 
             return R * R * (internalAngles - Mathf.PI * (N - 2));
+        }
+
+        public static GameObject GetLineHolder(GameObject parent, string name) {
+            GameObject lineHolder;
+            if (parent.transform.Find(name) == null) {
+                lineHolder = new GameObject(name);
+                lineHolder.transform.parent = parent.transform;
+                lineHolder.AddComponent<MeshRenderer>().sharedMaterial = LineDrawer.material;
+                lineHolder.AddComponent<MeshFilter>();
+            }
+            else { lineHolder = parent.transform.Find(name).gameObject; }
+
+            return lineHolder;
         }
 
     }

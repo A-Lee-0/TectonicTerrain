@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using System.Collections;
+//using GlobeLines;
 
 
 public class MantleCell
@@ -10,6 +11,14 @@ public class MantleCell
     public float strength = 10f;
     public float cosθ;
     Planet planet;
+
+    MantleCellRenderer renderer;
+
+
+    Vector3 centroid;
+    float area;
+
+    
 
 
     public MantleCell(Vector2 pos, Planet planet, float strength = 10f) {
@@ -23,14 +32,36 @@ public class MantleCell
 
     void Initialise(Vector3 pos, Planet planet, float strength) {
         // Consolidated code for constructors into one place, to ensure uniformity when adding parameters.
-        Vector2 polar_pos = CartesianToSpherical(pos.normalized * planet.radius);
-        this.theta = polar_pos.x;
-        this.phi = polar_pos.y;
-        this.position = pos.normalized * planet.radius;
         this.planet = planet;
+        SetPosition(pos);
         SetStrength(strength);
 
         
+    }
+
+
+
+
+    public Planet Planet => this.planet;
+    public Vector3 PlanetPosition => this.position;
+    public Vector3 WorldPosition => planet.position + this.position;
+    public Vector3[] Vertices => renderer.Vertices;
+    public MantleCellRenderer Renderer => renderer;
+    public Vector3 Centroid => centroid;
+    public float Area => area;
+
+    public bool HasRegion => Vertices.Length > 0;
+    public bool HasRenderer => !(renderer == null);
+
+    public void SetRenderer(MantleCellRenderer renderer) {
+        this.renderer = renderer;
+    }
+
+    public void SetPosition(Vector3 newPosition) {
+        position = newPosition.normalized * planet.radius;
+        Vector2 polar_pos = CartesianToSpherical(position);
+        this.theta = polar_pos.x;
+        this.phi = polar_pos.y;
     }
 
     public void SetStrength(float strength) {
@@ -43,9 +74,26 @@ public class MantleCell
     }
 
 
-    public Planet Planet => this.planet;
-    public Vector3 PlanetPosition => this.position;
-    public Vector3 WorldPosition => planet.position + this.position;
+    public Vector3 CalculateCentroid() {
+        if (HasRegion) {
+            centroid = renderer.Centroid;
+        }
+        else {
+            centroid = Vector3.zero;
+        }
+        return centroid;
+    }
+
+    public float CalculateArea() {
+        if (HasRegion) {
+            area = renderer.Area;
+        }
+        else {
+            area = 0f;
+        }
+        return area;
+    }
+
 
     public static Vector2 CartesianToSpherical(Vector3 cartCoords) {
         Vector2 polar;
@@ -66,4 +114,6 @@ public class MantleCell
         cartesian.z = a * Mathf.Sin(polar);
         return cartesian;
     }
+
+    
 }

@@ -24,6 +24,16 @@ public class MantleCellRenderer : MonoBehaviour
 
     GameObject circleHolder;
     GameObject lineHolder;
+    GameObject meshHolder;
+
+    public Shader lineShader;
+
+    public Mesh cellMesh;
+    public LineDrawer circleLine;
+    public Mesh lineMesh;
+
+    public List<SphericalTriangleMesh> cellSubMeshes = new List<SphericalTriangleMesh>();
+    public List<LineDrawer> boundarySubLines = new List<LineDrawer>();
 
     /*    public MantleCellRenderer(MantleCell cell, Vector3[] boundaryVertices) {
             this.cell = cell;
@@ -36,88 +46,122 @@ public class MantleCellRenderer : MonoBehaviour
     public void Setup(MantleCell cell, Vector3[] boundaryVertices) {
         this.cell = cell;
         this.vertices = SortClockwise(boundaryVertices);
+        cell.SetRenderer(this);
+        lineShader = Shader.Find("Particles/Standard Surface");
     }
 
     public void Reset(MantleCell cell, Vector3[] boundaryVertices) {
         this.cell = cell;
         this.vertices = SortClockwise(boundaryVertices);
+        cell.SetRenderer(this);
     }
 
     public MantleCell Cell => cell;
     public Vector3[] Vertices => vertices;
     public GameObject LineHolder => lineHolder;
     public GameObject CircleHolder => circleHolder;
+    public float Area => LineDrawer.Area(vertices, cell.Planet);
+    public Vector3 Centroid => LineDrawer.PolygonMoment(Vertices).normalized * cell.Planet.radius;
 
 
     public void DrawCellCircle(Color color, float width = 0.1f) {
+        Debug.Log("dir: " + cell.PlanetPosition + " , strength: " + cell.strength);
+        if (circleHolder == null) { circleHolder = LineDrawer.GetLineHolder(this.gameObject, "circle_holder"); }
 
-        LineDrawer circle = LineDrawer.GlobeCircle(cell.PlanetPosition, cell.strength, width, color, cell.Planet);
-        MeshFilter meshFilter;
+        if (circleLine == null) { circleLine = LineDrawer.NewGlobeCircle(cell.PlanetPosition, cell.strength, width, color, cell.Planet); }
+        else { circleLine.GlobeCircle(cell.PlanetPosition, cell.strength, width, color, cell.Planet); }
 
-        if (circleHolder == null) {
-            circleHolder = new GameObject("circle_holder");
-            circleHolder.transform.parent = transform;
-            circleHolder.AddComponent<MeshRenderer>().sharedMaterial = new Material(circle.shader);
-            meshFilter = circleHolder.AddComponent<MeshFilter>();
-        }
-        else { meshFilter = circleHolder.GetComponent<MeshFilter>(); }
-
-        meshFilter.sharedMesh = circle.mesh;
+        circleHolder.GetComponent<MeshFilter>().sharedMesh = circleLine.mesh;
 
     }
 
 
     public void DrawCellBoundary(Color color, float width = 0.1f) {
-        LineDrawer line;
-        //LineDrawer line = LineDrawer.GlobeCircle(cell.PlanetPosition, cell.strength, 0.1f, color, cell.Planet);
-        MeshFilter meshFilter;
+        if (lineHolder == null) {lineHolder = LineDrawer.GetLineHolder(gameObject,"line_holder");}
 
-        Mesh fullMesh = new Mesh();
+        MeshFilter meshFilter = lineHolder.GetComponent<MeshFilter>();
 
-        List<Vector3> meshVertices = new List<Vector3>();
-        List<int> meshTriangles = new List<int>();
-        List<Color> meshColors = new List<Color>();
-
-        if (lineHolder == null) {
-            lineHolder = new GameObject("line_holder");
-            lineHolder.transform.parent = transform;
-            lineHolder.AddComponent<MeshRenderer>();
-            meshFilter = lineHolder.AddComponent<MeshFilter>();
-        }
-        else { meshFilter = lineHolder.GetComponent<MeshFilter>(); }
+        CombineInstance[] meshCombineArray = new CombineInstance[vertices.Length];
 
         for (int i = 0; i < vertices.Length; i++) {
             Vector3 thisVert = vertices[i];
             Vector3 nextVert = vertices[(i + 1) % vertices.Length];
 
-            line = LineDrawer.GlobeLine(thisVert, nextVert, width, color, cell.Planet);
-
-
-            // TODO: consider replacing this junk with the Mesh.CombineMeshes() method.
-
-            int prevVerts = meshVertices.Count;
-            int[] tris = line.mesh.triangles;
-
-            meshVertices.AddRange(line.mesh.vertices);
-            for (int j = 0; j < tris.Length; j++) {
-                tris[j] += prevVerts;
+            // Find or Make LineDrawers for each side of the cell.
+            LineDrawer subLine;
+            if (i < boundarySubLines.Count) {
+                subLine = boundarySubLines[i];
+                subLine.GlobeLine(thisVert, nextVert, width, color, cell.Planet);
+            }
+            else {
+                subLine = LineDrawer.NewGlobeLine(thisVert, nextVert, width, color, cell.Planet);
+                boundarySubLines.Add(subLine);
             }
 
-            meshTriangles.AddRange(tris);
-            meshColors.AddRange(line.mesh.colors);
-            lineHolder.GetComponent<MeshRenderer>().sharedMaterial = new Material(line.shader);
-
+            meshCombineArray[i].mesh = subLine.mesh;
+            meshCombineArray[i].transform = transform.localToWorldMatrix;
         }
 
-        fullMesh.vertices = meshVertices.ToArray();
-        fullMesh.normals = meshVertices.ToArray();
-        fullMesh.triangles = meshTriangles.ToArray();
-        fullMesh.colors = meshColors.ToArray();
+
+        if (lineMesh == null) { lineMesh = new Mesh(); }
+        else { lineMesh.Clear(); }
 
 
+        lineMesh.CombineMeshes(meshCombineArray);
+        meshFilter.sharedMesh = lineMesh;        
 
-        meshFilter.sharedMesh = fullMesh;
+    }
 
+
+    public Mesh MakeMesh(int resolution) {
+        Vector3 centre = Centroid;
+        Vector3 v1;
+        Vector3 v2;
+
+        Vector3[] corners = new Vector3[3];
+        corners[0] = centre;
+
+        CombineInstance[] meshCombineArray = new CombineInstance[vertices.Length];
+
+        for (int i = 0; i < vertices.Length; i++) {
+            v1 = vertices[i];
+            v2 = vertices[(i+1)%vertices.Length];
+            corners[1] = v1; corners[2] = v2;
+
+
+            // Find or Make submeshes for each component triangle in the cell.
+            SphericalTriangleMesh submesh;
+            if (i < cellSubMeshes.Count) {
+                submesh = cellSubMeshes[i];
+                submesh.ChangeVertices(corners, resolution);
+            }
+            else {
+                submesh = new SphericalTriangleMesh(corners, resolution);
+                cellSubMeshes.Add(submesh);
+            }
+
+            meshCombineArray[i].mesh = submesh.mesh;
+            meshCombineArray[i].transform = transform.localToWorldMatrix;
+        }
+
+        // find obj holding the mesh in unity
+        if (meshHolder == null) { meshHolder = LineDrawer.GetLineHolder(this.gameObject, "mesh_holder"); }
+        MeshFilter meshFilter = meshHolder.GetComponent<MeshFilter>();
+
+        if (cellMesh == null) { cellMesh = new Mesh(); }
+        else { cellMesh.Clear(); } 
+
+        
+        cellMesh.CombineMeshes(meshCombineArray);
+        meshFilter.sharedMesh = cellMesh;
+
+        return cellMesh;
+
+    }
+
+    public void SetMeshColor(Color color) {
+        if (meshHolder == null) { meshHolder = LineDrawer.GetLineHolder(this.gameObject, "mesh_holder"); }
+        meshHolder.GetComponent<MeshRenderer>().material.color = color;
     }
 
     private Vector3[] SortClockwise(Vector3[] boundaryVertices) {
@@ -152,7 +196,7 @@ public class MantleCellRenderer : MonoBehaviour
 
     }
 
-    public float Area => LineDrawer.Area(vertices, cell.Planet);
+    
 
 
 }

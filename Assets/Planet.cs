@@ -9,16 +9,16 @@ public class Planet : MonoBehaviour
     public float rotationPeriod = 60f;
 
 
-    [Range(2, 100)]
-    public int resolution = 30;
+    //[Range(2, 100)]
+    //public int resolution = 30;
 
     //public string shader = "Standard";
-    public Shader shader;
+    //public Shader shader;
 
     //[SerializeField, HideInInspector]
-    [SerializeField]
-    MeshFilter[] meshFilters;
-    TerrainFace[] terrainFaces;
+    //[SerializeField]
+    //MeshFilter[] meshFilters;
+    //TerrainFace[] terrainFaces;
 
 
     // Runs when unity compiles the script (i.e. in edit mode, not play)
@@ -31,14 +31,14 @@ public class Planet : MonoBehaviour
     }
 
     void Setup() { 
-        Initialise();
-        GenerateMesh();
+        //Initialise();
+        //GenerateMesh();
         
         if (GetComponent<SphereCollider>() == null) { gameObject.AddComponent<SphereCollider>(); }
         GetComponent<SphereCollider>().radius = radius;
     }
 
-
+    /*
     void Initialise() {
         // if no shader, find one:
         if (shader == null) { shader = Shader.Find("Particles/Standard Surface"); }
@@ -63,34 +63,26 @@ public class Planet : MonoBehaviour
             terrainFaces[i] = new TerrainFace(meshFilters[i].sharedMesh, resolution, directions[i], radius);
         }
     }
+    */
 
+    /*
     void GenerateMesh() {
         foreach (TerrainFace face in terrainFaces) {
             face.ConstructMesh();
         }
-
-        
-        //test vertex colors
-        /*foreach (TerrainFace face in terrainFaces) {
-
-            Mesh test = face.mesh;
-            int pointCount = test.vertexCount;
-            Color[] colors = { Color.red, Color.blue };
-            Color[] pointColors = new Color[pointCount];
-            for (int i = 0; i < pointCount; i++) {
-                pointColors[i] = colors[i % 2];
-            }
-            test.SetColors(pointColors);
-        }
-        */
     }
+    */
 
     public double Circumference => 2 * Mathf.PI * radius;
 
+
+    /*
     public TerrainFace[] PlanetFaces() {
         return terrainFaces;
     }
+    */
 
+    /*
     public Mesh[] PlanetMeshes() {
         //Debug.Log(terrainFaces);
         Mesh[] meshes = new Mesh[terrainFaces.Length];
@@ -99,5 +91,6 @@ public class Planet : MonoBehaviour
         }
         return meshes;
     }
+    */
 
 }

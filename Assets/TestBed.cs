@@ -136,14 +136,14 @@ public class TestBed : MonoBehaviour
 
     void DebugLineDraw() {
         // test globeline
-        LineDrawer line = LineDrawer.GlobeLine(Vector3.up, Vector3.right, 0.1f, Color.magenta, focus_planet);
+        LineDrawer line = LineDrawer.NewGlobeLine(Vector3.up, Vector3.right, 0.1f, Color.magenta, focus_planet);
 
         GameObject lineMeshObj;
         MeshFilter lineMeshFilter;
         if (transform.Find("line_mesh") == null) {
             lineMeshObj = new GameObject("line_mesh");         // create new GameObject with name of "planet_mesh"
             lineMeshObj.transform.parent = transform;                       // set the parent to this object}
-            lineMeshObj.AddComponent<MeshRenderer>().sharedMaterial = new Material(line.shader);
+            lineMeshObj.AddComponent<MeshRenderer>().sharedMaterial = LineDrawer.material;
             lineMeshFilter = lineMeshObj.AddComponent<MeshFilter>();
         }
         else {
@@ -156,14 +156,14 @@ public class TestBed : MonoBehaviour
 
     void DebugLineDraw(string name, Vector3 start, Vector3 end, Color color, float thickness = 0.1f, float height = 0.01f, int segments = 30) {
         // test globeline
-        LineDrawer line = LineDrawer.GlobeLine(start, end, thickness, color, focus_planet, segments, height);
+        LineDrawer line = LineDrawer.NewGlobeLine(start, end, thickness, color, focus_planet, segments, height);
 
         GameObject lineMeshObj;
         MeshFilter lineMeshFilter;
         if (transform.Find(name) == null) {
             lineMeshObj = new GameObject(name);         // create new GameObject with name of "planet_mesh"
             lineMeshObj.transform.parent = transform;                       // set the parent to this object}
-            lineMeshObj.AddComponent<MeshRenderer>().sharedMaterial = new Material(line.shader);
+            lineMeshObj.AddComponent<MeshRenderer>().sharedMaterial = LineDrawer.material;
             lineMeshFilter = lineMeshObj.AddComponent<MeshFilter>();
         }
         else {
@@ -177,14 +177,14 @@ public class TestBed : MonoBehaviour
 
     void DebugCircleDraw() {
         // test circle
-        LineDrawer circle = LineDrawer.GlobeCircle(Vector3.up, 25f, 0.1f, Color.magenta, focus_planet);
+        LineDrawer circle = LineDrawer.NewGlobeCircle(Vector3.up, 25f, 0.1f, Color.magenta, focus_planet);
 
         GameObject meshObj;
         MeshFilter meshFilter;
         if (transform.Find("circle_mesh") == null) {
             meshObj = new GameObject("circle_mesh");         // create new GameObject with name of "planet_mesh"
             meshObj.transform.parent = transform;                       // set the parent to this object}
-            meshObj.AddComponent<MeshRenderer>().sharedMaterial = new Material(circle.shader);
+            meshObj.AddComponent<MeshRenderer>().sharedMaterial = LineDrawer.material;
             meshFilter = meshObj.AddComponent<MeshFilter>();
         }
         else {
