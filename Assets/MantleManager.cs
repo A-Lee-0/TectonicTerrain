@@ -122,7 +122,7 @@ public class MantleManager : MonoBehaviour
         float areaOverreach = 1f;
         float dirFactor = -0.05f;
         foreach (var cell in mantleCells) {
-            if (cell.HasRegion) {
+            if (cell.HasRegion && cell.Area > 0.01f) {
                 cell.SetPosition(Vector3.SlerpUnclamped(cell.PlanetPosition, cell.Centroid, dirFactor * 0.1f));
                 cell.SetStrength(Mathf.Lerp(cell.strength, areaOverreach * Mathf.Sqrt(cell.Area / Mathf.PI), 0.1f));
             }
@@ -133,6 +133,18 @@ public class MantleManager : MonoBehaviour
                 cell.SetStrength(0.01f);
             }
         }
+
+        //Debug.Log("Strengths this frame:");
+        foreach(var cell in mantleCells) {
+            cell.Renderer.debugArea = cell.Area;
+            //Debug.Log("cell strength: " + cell.strength);
+            if (float.IsNaN(cell.strength)) {
+                Debug.Log("cell area: " + cell.Area + " , pos: " + cell.PlanetPosition);
+                Debug.Log("no cell verts: " + cell.Renderer.Vertices.Length);
+                for (int i = 0; i < cell.Renderer.Vertices.Length; i++) { Debug.Log("vert: " + cell.Renderer.Vertices[i]); }
+            }
+        }
+        
 
         // 2.  Recalculates the boundary lines for each MantleCell.
         //PaintInfluenceOnMeshes(meshes); // temp - wants to be replaced by cell meshes eventually!
@@ -233,6 +245,8 @@ public class MantleManager : MonoBehaviour
         // 0 < θ_i < π/2
 
 
+        // TODO: currently breaks when a cell covers more than half the sphere. Figure out solution, or ensure a cell can never be larger than a hemisphere.
+
 
         //1. Find cos( θ(P,P_i) ) using dot product
         float top = Vector3.Dot(cell.PlanetPosition.normalized, pos.normalized);
@@ -294,6 +308,7 @@ public class MantleManager : MonoBehaviour
         
         // for each face in dual space, calculate corresponding intersection in real space, and add it to cellPoints list for each cell.
         // In principle this could error if all three points lie on a great-circle of the sphere, but for any reasonable number of regions, this won't happen.
+        // TODO: fix for great circle case.
         for (int i = 0; i< cellIntersections.Length/3; i++) {
 
             //use cell indices to find cells joining at point.

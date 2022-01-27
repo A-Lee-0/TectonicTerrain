@@ -32,6 +32,8 @@ public class MantleCellRenderer : MonoBehaviour
     public LineDrawer circleLine;
     public Mesh lineMesh;
 
+    public float debugArea;
+
     public List<SphericalTriangleMesh> cellSubMeshes = new List<SphericalTriangleMesh>();
     public List<LineDrawer> boundarySubLines = new List<LineDrawer>();
 
@@ -65,12 +67,17 @@ public class MantleCellRenderer : MonoBehaviour
 
 
     public void DrawCellCircle(Color color, float width = 0.1f) {
-        Debug.Log("dir: " + cell.PlanetPosition + " , strength: " + cell.strength);
+        //Debug.Log("dir: " + cell.PlanetPosition + " , strength: " + cell.strength);
         if (circleHolder == null) { circleHolder = LineDrawer.GetLineHolder(this.gameObject, "circle_holder"); }
 
         if (circleLine == null) { circleLine = LineDrawer.NewGlobeCircle(cell.PlanetPosition, cell.strength, width, color, cell.Planet); }
         else { circleLine.GlobeCircle(cell.PlanetPosition, cell.strength, width, color, cell.Planet); }
 
+        //Debug.Log("no. verts: " + circleLine.mesh.vertices.Length);
+
+        //foreach (var vert in circleLine.mesh.vertices) {
+        //    Debug.Log("vert: " + vert);
+        //} 
         circleHolder.GetComponent<MeshFilter>().sharedMesh = circleLine.mesh;
 
     }
@@ -168,7 +175,14 @@ public class MantleCellRenderer : MonoBehaviour
         // To draw the cell boundary, the boundary vertices need to be sorted.
         // this can be done by projecting the vertices to 2D along the cell's centre, then taking the Vector2.Angle between the point and a fixed reference
 
-        Quaternion rotToUp = Quaternion.FromToRotation(cell.PlanetPosition, Vector3.up);
+        //initially rotated using the cell.PlanetPosition, but this is not necessarily inside the cell region.
+        //ideally just reuse centroid, but that is calculated using the clockwise sorted points here.
+        //instead, just use the mean vector - it's gross, but should be fine as the regions are always convex.
+        Vector3 meanVert = Vector3.zero;
+        for (int i = 0; i < boundaryVertices.Length; i++) {
+            meanVert += boundaryVertices[i];
+        }
+        Quaternion rotToUp = Quaternion.FromToRotation(meanVert, Vector3.up);
 
         Vector3[] rotVerts = new Vector3[boundaryVertices.Length];
 
