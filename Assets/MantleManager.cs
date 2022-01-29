@@ -7,25 +7,58 @@ using GlobeLines;
 
 using GK;       // third party module for calculating the convex hull from a set of vertices.
 
+
+/*
+ * Added basic UI elements to allow player to change target area and speed towards centroid values for cells, and to 
+ * choose from different cell respawn, and area calculation methods. Unfortunately the new respawn methods in particular 
+ * are quite buggy. Using MTTH cell spawning can easily cause the number of cells to fall too low, causing the ConvexHull 
+ * calculator to fail. Using the spawning at near-boundary vertices, to ensure the new cell has a small area, tends to 
+ * cause chain spawns in the same spots, causing either the ConvexHull or the subsequent vertex finder to fail. Attempts 
+ * to fix it by preventing spawns too close to other vertices then causes it to run out of vertices to try, throw index
+ * out of bounds errors...
+ * 
+ * 
+ * */
+
 public class MantleManager : MonoBehaviour
 {
     public List<MantleCell> mantleCells;
     public Planet planet;
 
-    public LineDrawer[] lines;
-    public List<LineDrawer> dirLines = new List<LineDrawer>();
+    public List<LineDrawer> dirLines = new List<LineDrawer>(); // Holds lines from cell circles to the cell's region CoM
 
 
     public GameObject lineHolder;
-    
+
+    List<Vector3> planetIntersectionVertices = new List<Vector3>();
+    List<float> planetIntersectionVertexScores = new List<float>();
+
+
+    public Vector3[] DebugIntersections;
+    public float[] DebugScores;
+
 
     Color[] region_colors = { Color.red, Color.blue, Color.yellow, Color.magenta, Color.green, Color.cyan };
 
-    //public List<MantleCellRenderer> mantleCellRenderers;
 
+    public float centroidAttraction = -0.05f;
+    public float targetAreaFactor = 1f;
+    public int strengthUpdateMethod = 1;
+    public int respawnMethod = 0;
+
+
+    public float respawnMTTH = 5f; // Mean Time To Happen for cell spawns in seconds.
+    public float defaultRespawnStrength = 0.01f;
+
+    public List<MantleCellRenderer> unassignedMantleCellRenderers;
+
+
+    int lastColor = 0;
 
     // Runs when unity compiles the script (i.e. in edit mode, not play)
     private void OnValidate() {
+
+        //strengthUpdateMethods.Add()
 
         // having nullreference exceptions running it here - call it from planet instead.
         //DebugSetup();
@@ -51,6 +84,8 @@ public class MantleManager : MonoBehaviour
 
         foreach (int i in Enumerable.Range(0, 20)) {
             mantleCells.Add(new MantleCell(UnityEngine.Random.onUnitSphere,planet,UnityEngine.Random.Range(0f,1f)));
+            mantleCells[i].color = region_colors[lastColor];
+            lastColor = (lastColor + 1)% region_colors.Length;
         }
 
         /*mantleCells.Add(new MantleCell(Vector3.right, planet, 1f));
@@ -61,9 +96,6 @@ public class MantleManager : MonoBehaviour
 
 
 
-        //Mesh[] meshes = planet.PlanetMeshes();
-        //this.meshes = meshes;
-
         DateTime t1 = DateTime.Now;
         //PaintInfluenceOnMeshes(meshes);
         DateTime t2 = DateTime.Now;
@@ -73,6 +105,15 @@ public class MantleManager : MonoBehaviour
         //draw lines
 
         //DrawCellCircles();
+
+
+        // Mark all CellRenderers in the scene as unused for now.
+        MantleCellRenderer[] renderers = FindObjectsOfType<MantleCellRenderer>();
+        foreach (var renderer in renderers) {
+            renderer.ClearCell();
+            unassignedMantleCellRenderers.Add(renderer);
+        }
+
         BuildPowerDiagramBoundaries(mantleCells.ToArray());
         DateTime t3 = DateTime.Now;
 
@@ -117,37 +158,61 @@ public class MantleManager : MonoBehaviour
     /// 2.  Recalculates the boundary lines for each MantleCell.
     /// </summary>
     public void DoUpdate() {
+        respawnsThisFrame = 0;  // reset this so respawn indices are correct
+        RecalculateVertexScoreRankings();
+        DebugIntersections = planetIntersectionVertices.ToArray();
+        DebugScores = planetIntersectionVertexScores.ToArray();
+
+//        Debug.Log("Smallest At: " + vertsNear1[0]);
+//        Debug.DrawRay(Vector3.zero, vertsNear1[0] * 5, Color.white);
 
         // 1a. Moves all MantleCells towards their region CoM, and changes radius depending on it's current area.
-        float areaOverreach = 1f;
-        float dirFactor = -0.05f;
-        foreach (var cell in mantleCells) {
-            if (cell.HasRegion && cell.Area > 0.01f) {
-                cell.SetPosition(Vector3.SlerpUnclamped(cell.PlanetPosition, cell.Centroid, dirFactor * 0.1f));
-                cell.SetStrength(Mathf.Lerp(cell.strength, areaOverreach * Mathf.Sqrt(cell.Area / Mathf.PI), 0.1f));
+        // TODO: maybe make this more interesting? As is, once a cell's circle is slightly offset from its region, it begins a suicide charge away from itself.S
+
+        float targetStr = 0f;
+        MantleCell cellToMove;
+        for (int i = 0; i< mantleCells.Count; i++) {
+            cellToMove = mantleCells[i];
+            if (cellToMove.HasRegion && cellToMove.Area > 0.01f) {
+                targetStr = CalculateNewCellStrength(cellToMove, this.targetAreaFactor);
+                cellToMove.SetPosition(Vector3.SlerpUnclamped(cellToMove.PlanetPosition, cellToMove.Centroid, this.centroidAttraction * 0.1f));
+                cellToMove.SetStrength(Mathf.Lerp(cellToMove.strength, targetStr, 0.1f));
+
             }
             //  b. Moves MantleCells without a region to a new location.
             else {
-                Debug.Log("Relocating cell!");
-                cell.SetPosition(UnityEngine.Random.onUnitSphere * cell.Planet.radius);
-                cell.SetStrength(0.01f);
+                // TODO: Make this more interesting than just a random point. Ideally want to identify points that are natually bounded, e.g. intersection of two circles
+                // could work with cell colour, and have the new region be the average colour - it's 'budded' from the parents.
+                // or could just have bud be one parent colour, and have it be a 'colony'
+                RespawnCell(cellToMove);
             }
         }
 
+        // Spawn new cells for MTTH spawning
+        // Probability of at least 1 event in time dt = 1 - e^(-dt/MTTH)
+        if(UnityEngine.Random.value > Mathf.Exp(-Time.deltaTime / respawnMTTH)) {
+            //spawn a new cell
+            MantleCell newCell = RespawnCell();
+            if (!(newCell == null)) { mantleCells.Add(RespawnCell()); }
+            
+        }
+
         //Debug.Log("Strengths this frame:");
-        foreach(var cell in mantleCells) {
-            cell.Renderer.debugArea = cell.Area;
-            //Debug.Log("cell strength: " + cell.strength);
-            if (float.IsNaN(cell.strength)) {
-                Debug.Log("cell area: " + cell.Area + " , pos: " + cell.PlanetPosition);
-                Debug.Log("no cell verts: " + cell.Renderer.Vertices.Length);
-                for (int i = 0; i < cell.Renderer.Vertices.Length; i++) { Debug.Log("vert: " + cell.Renderer.Vertices[i]); }
+        foreach (var cell in mantleCells) {
+            if (cell.HasRenderer) {
+                cell.Renderer.debugArea = cell.Area;
+                //Debug.Log("cell strength: " + cell.strength);
+                if (float.IsNaN(cell.strength)) {
+                    Debug.Log("cell area: " + cell.Area + " , pos: " + cell.PlanetPosition);
+                    Debug.Log("no cell verts: " + cell.Renderer.Vertices.Length);
+                    for (int i = 0; i < cell.Renderer.Vertices.Length; i++) { Debug.Log("vert: " + cell.Renderer.Vertices[i]); }
+                }
             }
         }
         
 
         // 2.  Recalculates the boundary lines for each MantleCell.
-        //PaintInfluenceOnMeshes(meshes); // temp - wants to be replaced by cell meshes eventually!
+        //     Also Assigns renderers to cells if they need them.
         BuildPowerDiagramBoundaries(mantleCells.ToArray());
 
 
@@ -161,15 +226,165 @@ public class MantleManager : MonoBehaviour
         int surfaceResolution = 10; 
         foreach (var cell in mantleCells) {
             cell.Renderer.MakeMesh(surfaceResolution);
+            cell.Renderer.SetMeshColor(cell.color);
         }
 
-        for (int i = 0; i < mantleCells.Count; i++) {
-            mantleCells[i].Renderer.SetMeshColor(region_colors[i % region_colors.Length]);
-        }
+        // Moved Into loop above, using saved color on each cell. Useful for genetics down the road maybe.
+        //for (int i = 0; i < mantleCells.Count; i++) {
+        //    mantleCells[i].Renderer.SetMeshColor(region_colors[i % region_colors.Length]);
+        //}
 
     }
 
 
+    public Dictionary<int, string> respawnMethods = new Dictionary<int, string> { { 0, "Random, Instant" },
+                                                                                  { 1, "At ~1 score vertex, Instant" },
+                                                                                  { 2, "At most score vertex, Instant" },
+                                                                                  { 3, "Random, MTTH  (Poisson)" },
+                                                                                  { 4, "At ~1 score vertex, MTTH" },
+                                                                                  { 5, "At most score vertex, MTTH" }};
+
+    int respawnsThisFrame = 0;
+    MantleCell RespawnCell(MantleCell cell) {       // used for cell-by-cell respawns (i.e. instant)
+        switch (respawnMethod) {
+            case 0:
+                Vector3 newPos = UnityEngine.Random.onUnitSphere;
+                while (SpawnIsTooCloseToAnotherCell(newPos)){
+                    Debug.Log("Retry respawn - random location too close to another cell! Trying again...");
+                    respawnsThisFrame += 1;
+                    newPos = UnityEngine.Random.onUnitSphere;
+                }
+                Debug.Log("Respawned: " + respawnMethods[0]);
+                cell.SetPosition(newPos);
+                cell.SetStrength(defaultRespawnStrength);
+                respawnsThisFrame += 1;
+                return cell;
+            case 1:
+                while (SpawnIsTooCloseToAnotherCell(vertsNear1[respawnsThisFrame])){
+                    Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+                    respawnsThisFrame += 1;
+                }
+                Debug.Log("Respawned: " + respawnMethods[1] + " at: " + vertsNear1[respawnsThisFrame] + "using index: " + respawnsThisFrame);
+                cell.SetPosition(vertsNear1[respawnsThisFrame]);
+                cell.SetStrength(defaultRespawnStrength);
+                respawnsThisFrame += 1;
+                return cell;
+            case 2:
+                while (SpawnIsTooCloseToAnotherCell(vertsLargest[respawnsThisFrame])) {
+                    Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+                    respawnsThisFrame += 1;
+                }
+                Debug.Log("Respawned: " + respawnMethods[2]);
+                cell.SetPosition(vertsLargest[respawnsThisFrame]);
+                cell.SetStrength(defaultRespawnStrength);
+                respawnsThisFrame += 1;
+                return cell;
+            default: // If not doing one of the above, then delete the cell.
+                Debug.Log("Deleting cell");
+                mantleCells.Remove(cell); //remove cell from list of cells. c# GC 'should' pick it up from here...
+                unassignedMantleCellRenderers.Add(cell.Renderer); // Add to list of unused cells.
+                cell.Renderer.ClearCell();  // Make the renderer forget the cell
+                cell.SetRenderer(null);     // Make the cell forget the renderer
+                return null;
+        }
+    }
+    MantleCell RespawnCell() {                  // used for update-wide respawns (i.e. non-instant)
+        MantleCell newCell;
+        switch (respawnMethod) {
+            case 3:
+                Vector3 newPos = UnityEngine.Random.onUnitSphere;
+                while (SpawnIsTooCloseToAnotherCell(newPos)) {
+                    Debug.Log("Retry respawn - random location too close to another cell! Trying again...");
+                    respawnsThisFrame += 1;
+                    newPos = UnityEngine.Random.onUnitSphere;
+                }
+                Debug.Log("Respawned: " + respawnMethods[3]);
+                newCell = new MantleCell(newPos, this.planet, defaultRespawnStrength);
+                mantleCells.Add(newCell);
+                newCell.color = region_colors[lastColor];
+                lastColor = (lastColor + 1) % region_colors.Length;
+                respawnsThisFrame += 1;
+                return newCell;
+            case 4:
+                while (SpawnIsTooCloseToAnotherCell(vertsNear1[respawnsThisFrame])) {
+                    Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+                    respawnsThisFrame += 1;
+                }
+                Debug.Log("Respawned: " + respawnMethods[4]);
+                newCell = new MantleCell(vertsNear1[respawnsThisFrame], this.planet, defaultRespawnStrength);
+                mantleCells.Add(newCell);
+                newCell.color = region_colors[lastColor];
+                lastColor = (lastColor + 1) % region_colors.Length;
+                respawnsThisFrame += 1;
+                return newCell;
+            case 5:
+                while (SpawnIsTooCloseToAnotherCell(vertsLargest[respawnsThisFrame])) {
+                    Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+                    respawnsThisFrame += 1;
+                }
+                Debug.Log("Respawned: " + respawnMethods[5]);
+                newCell = new MantleCell(vertsLargest[respawnsThisFrame], this.planet, defaultRespawnStrength);
+                mantleCells.Add(newCell);
+                newCell.color = region_colors[lastColor];
+                lastColor = (lastColor + 1) % region_colors.Length;
+                respawnsThisFrame += 1;
+                return newCell;
+            default:
+                return null;
+        }
+        
+    }
+
+
+    public Dictionary<int, string> strengthUpdateMethods = new Dictionary<int, string> { { 0, "Spherical Area" },
+                                                                                         { 1, "Circular Area" }};
+    float CalculateNewCellStrength(MantleCell cell, float areaFactor) {
+        float targetArea = areaFactor * cell.Area;
+        float radius = cell.Planet.radius;
+        switch (strengthUpdateMethod) {
+            case  0:
+                return radius * Mathf.Acos(1 - Mathf.Max(targetArea / (2 * Mathf.PI * radius * radius),-0.99f));
+            case 1:
+                return Mathf.Min(Mathf.Sqrt(targetArea / Mathf.PI), 0.99f * Mathf.PI * radius);
+
+            default:
+                return 0f;
+
+        }
+    }
+
+    Vector3[] vertsLargest;
+    public Vector3[] vertsNear1;
+    
+    void RecalculateVertexScoreRankings() {
+        vertsLargest = planetIntersectionVertices.ToArray();
+        Array.Sort(planetIntersectionVertexScores.ToArray(), vertsLargest);
+        Array.Reverse(vertsLargest);
+
+        vertsNear1 = planetIntersectionVertices.ToArray();
+
+        float[] scoreNear1 = planetIntersectionVertexScores.ToArray();
+        for (int i = 0; i < scoreNear1.Length; i++) {
+            scoreNear1[i] = Mathf.Abs(scoreNear1[i] - 1);
+        }
+        Array.Sort(scoreNear1, vertsNear1);
+    }
+
+    bool SpawnIsTooCloseToAnotherCell(Vector3 proposedSpawn, float threshold = 0.0006f) {// approx. within 2 degress -> fail.
+        float limit = 1f - threshold;   
+        Vector3 norm = proposedSpawn.normalized;
+        foreach (var cell in mantleCells) {
+            if( Vector3.Dot(norm, cell.PlanetPosition.normalized) > limit) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    
+    // Obsolete, as now each cell builds its own mesh.
+    /*
     void PaintInfluenceOnMeshes(Mesh[] meshes) {
         foreach (Mesh mesh in meshes) {
             int vert_count = mesh.vertexCount;
@@ -196,6 +411,7 @@ public class MantleManager : MonoBehaviour
             
         }
     }
+    */
 
     float GetCellStrength(MantleCell cell, Vector3 pos, bool debug = false) {
         return GetCellStrengthPowerDiagram(cell, pos, debug);
@@ -206,15 +422,12 @@ public class MantleManager : MonoBehaviour
         // I.e. the plane orthogonal to the cell's radial line that passes through the target point.
         // Can calculate using the dot product and pythagorus.
         // r = sqrt( R^2 - (c.p)^2 )
-        
-
 
         Vector3 cell_pos = cell.PlanetPosition;
         float R = cell_pos.magnitude;
         float dot = Vector3.Dot(cell_pos, pos)/R;
 
         float circumference = 2 * Mathf.PI * Mathf.Sqrt(R * R - dot * dot);
-
 
         if (debug) {
             Debug.Log("cell_pos: " + cell_pos);
@@ -224,11 +437,7 @@ public class MantleManager : MonoBehaviour
             Debug.Log("result: " + cell.strength / circumference);
         }
 
-
         return cell.strength / circumference;
-         
-        
-
     }
 
     float GetCellStrengthPowerDiagram(MantleCell cell, Vector3 pos, bool debug = false) {
@@ -240,7 +449,7 @@ public class MantleManager : MonoBehaviour
         // To extend this onto the surface of sphere, consider http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.95.3444&rep=rep1&type=pdf
         // Running through the maths for a non-unit sphere ends up similar, but more explicit about what is an angle vs an arclength:
         //      D = cos( θ(P,P_i) ) / cos( θ_i )
-        // where the θs are the angle from the arbitrary point, P, to the centre of circle i, P_i, and the angular size of circle i, θ_i = r_i/R.
+        // where the θs are the angle from the arbitrary point, P, to the centre of circle i, P_i, and the angular radius of circle i, θ_i = r_i/R.
         // i.e instead of caring about the radius of a circle r_i, better to store the angle of a circle θ_i
         // 0 < θ_i < π/2
 
@@ -254,10 +463,17 @@ public class MantleManager : MonoBehaviour
 
         //negate, as code currently looks for a 'strength' i.e. largest wins, rather than a 'distance' i.e. smallest wins.
         // for some reason it doesn't want the negation? don't quite understand why tbh...
+        // Right. In Euclidean, the score d²-r² is clearly negative for r>d, i.e. points within the circle.
+        // But on Sphere, cos(θ) is always positive for 0 < θ < π/2. As an evaluated point gets closer to the centre of the cell, the numerator goes to 1.
+        // I.e. no need to negate, as the score already decreases as you move away from the circle.
         return top / bottom;
         
     }
 
+
+    // TODO: Should probably move to the MantleCellRenderer class at some point...
+    // Only reason not to is it seems a little wasteful to have a whole extra Mesh on each CellRenderer, just to hold a single basic line :/
+    // Maybe combine the line mesh with the circle mesh?
     public void DrawLinesToCoM(List<MantleCell> cells) {
         int regions = 0;
         for (int i = 0; i < cells.Count; i++) {
@@ -305,10 +521,12 @@ public class MantleManager : MonoBehaviour
 
         List <Vector3>[] cellPoints = new List<Vector3>[cells.Length];
         for (int i = 0; i < cells.Length;i++){ cellPoints[i] = new List<Vector3>(); }
+        this.planetIntersectionVertices.Clear();
+        this.planetIntersectionVertexScores.Clear();
         
         // for each face in dual space, calculate corresponding intersection in real space, and add it to cellPoints list for each cell.
         // In principle this could error if all three points lie on a great-circle of the sphere, but for any reasonable number of regions, this won't happen.
-        // TODO: fix for great circle case.
+        // TODO: fix for 3 verts on great circle case.
         for (int i = 0; i< cellIntersections.Length/3; i++) {
 
             //use cell indices to find cells joining at point.
@@ -327,7 +545,10 @@ public class MantleManager : MonoBehaviour
             Vector3 intersection;
             bool noError = PlanesIntersectAtSinglePoint(plane1, plane2, plane3, out intersection);
 
-            if (!noError) { Debug.LogError("Unable to find intersection point for three planes!" + plane1 + ", " + plane2 + ", " + plane3); }
+            if (!noError) {
+                Debug.LogError("Unable to find intersection point for three planes!" + plane1 + ", " + plane2 + ", " + plane3);
+                Debug.LogError("Strengths: " + cell1.strength + ", " + cell2.strength + ", " + cell3.strength);
+            }
 
             // check if intersection point is on wrong side of globe (e.g. all cells on northern hemisphere still has intersections on southern hemisphere)
             Vector3 normal = normals[3 * i];
@@ -338,30 +559,27 @@ public class MantleManager : MonoBehaviour
             cellPoints[c1].Add(intersection);
             cellPoints[c2].Add(intersection);
             cellPoints[c3].Add(intersection);
+
+            // Also record where the vertices are, and what the cells' 'distance' to that point are:
+            this.planetIntersectionVertices.Add(intersection);
+            this.planetIntersectionVertexScores.Add(GetCellStrength(cell1, intersection));
         }
 
         // Need this section to handle orphaned mantleCellRenderers from the onValidate calls.
         // Wasn't a problem when MantleManager held its own list of the Renderers, but trying to move away from that.
-        MantleCellRenderer[] renderers = FindObjectsOfType<MantleCellRenderer>();
-        List<MantleCellRenderer> unassignedRenderers = new List<MantleCellRenderer>();
-        foreach (var renderer in renderers) {
-            if (mantleCells.Contains(renderer.Cell)){ renderer.Cell.SetRenderer(renderer); }
-            else { unassignedRenderers.Add(renderer); }
-        }
 
         MantleCell cell;
         for (int i = 0; i < mantleCells.Count; i++) {
             cell = mantleCells[i];
             Vector3[] boundaryVertices = cellPoints[i].ToArray();
 
-
             if (!cell.HasRenderer) {
-                if (unassignedRenderers.Count > 0) {
-                    Debug.Log("Reassigning Renderer");
-                    cell.SetRenderer(unassignedRenderers[0]);
+                if (unassignedMantleCellRenderers.Count > 0) {
+                    //Debug.Log("Reassigning Renderer");
+                    cell.SetRenderer(unassignedMantleCellRenderers[0]);
                     cell.Renderer.Reset(mantleCells[i], boundaryVertices);
 
-                    unassignedRenderers.RemoveAt(0);
+                    unassignedMantleCellRenderers.RemoveAt(0);
                 }
                 else {
                     Debug.Log("Creating new cell_renderer for cell " + i);

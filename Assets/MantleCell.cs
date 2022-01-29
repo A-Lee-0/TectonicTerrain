@@ -11,8 +11,9 @@ public class MantleCell
     public float strength = 10f;
     public float cosθ;
     Planet planet;
+    public Color color;
 
-    MantleCellRenderer renderer;
+    MantleCellRenderer renderer = null;
 
 
     Vector3 centroid;

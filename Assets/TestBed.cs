@@ -11,7 +11,7 @@ public class TestBed : MonoBehaviour
     public Vector3 startPoint = Vector3.up;
     public Vector3 endPoint = Vector3.forward;
 
-    public Camera camera;
+    public Camera playerCamera;
 
     public int lineSegments = 30;
     LineRenderer test_line;
@@ -33,7 +33,7 @@ public class TestBed : MonoBehaviour
     void Update()
     {
         RaycastHit hit;
-        Ray ray = camera.ScreenPointToRay(Input.mousePosition);
+        Ray ray = playerCamera.ScreenPointToRay(Input.mousePosition);
 
         if (Physics.Raycast(ray, out hit)) {
             Transform objectHit = hit.transform;
@@ -64,8 +64,36 @@ public class TestBed : MonoBehaviour
 
         //DebugSphericalCoM();
 
+        //DebugSphTrianglePointDensity()
 
 
+
+
+
+        }
+
+    void DebugSphTrianglePointDensity() {
+        var meshHolder = LineDrawer.GetLineHolder(this.gameObject, "mesh_holder");
+        MeshFilter meshFilter = meshHolder.GetComponent<MeshFilter>();
+
+        Vector3 p1 = Vector3.up;
+        Vector3 p2 = Vector3.right;
+        Vector3 p3 = Vector3.forward;
+        Vector3 p4 = Vector3.back;
+
+        var sphTri1 = new SphericalTriangleMesh(new Vector3[] { p1, p2, p3 }, 5);
+        var sphTri2 = new SphericalTriangleMesh(new Vector3[] { p2, p1, p4 }, 5);
+
+        CombineInstance[] meshArray = new CombineInstance[2];
+        meshArray[0].mesh = sphTri1.mesh;
+        meshArray[0].transform = transform.localToWorldMatrix;
+        meshArray[1].mesh = sphTri2.mesh;
+        meshArray[1].transform = transform.localToWorldMatrix;
+
+
+        if (meshFilter.sharedMesh == null) { meshFilter.sharedMesh = new Mesh(); }
+        else { meshFilter.sharedMesh.Clear(); }
+        meshFilter.sharedMesh.CombineMeshes(meshArray);
     }
 
     void DebugSphericalCoM() {

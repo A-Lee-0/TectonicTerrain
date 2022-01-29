@@ -58,6 +58,8 @@ public class MantleCellRenderer : MonoBehaviour
         cell.SetRenderer(this);
     }
 
+    public void ClearCell() { this.cell = null; }
+
     public MantleCell Cell => cell;
     public Vector3[] Vertices => vertices;
     public GameObject LineHolder => lineHolder;

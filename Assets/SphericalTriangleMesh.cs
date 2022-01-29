@@ -75,10 +75,11 @@ public class SphericalTriangleMesh
         Vector3[] vertices = new Vector3[(resolution + 1) * (resolution + 2) / 2];
 
 
+
         // Build vertices
-        Vector3 v0 = corners[0];
-        Vector3 v1 = (corners[1] - corners[0]) / resolution;
-        Vector3 v2 = (corners[2] - corners[1]) / resolution;
+        Vector3 v0 = corners[0].normalized; 
+        Vector3 v1 = (corners[1].normalized - corners[0].normalized) / resolution;
+        Vector3 v2 = (corners[2].normalized - corners[1].normalized) / resolution;
         int maxPInLine = resolution + 1;
         int pointsInLine = 1;
         int vertIndex = 0;

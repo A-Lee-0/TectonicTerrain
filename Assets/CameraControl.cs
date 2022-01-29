@@ -5,7 +5,7 @@ using UnityEngine;
 public class CameraControl : MonoBehaviour
 {
 
-    public Camera camera;
+    public Camera playerCamera;
 
     public Planet focus_planet;
 
@@ -84,8 +84,8 @@ public class CameraControl : MonoBehaviour
         Quaternion theta_rot = Quaternion.AngleAxis(pos_theta, Vector3.down);           // LHS coordinates in unity.
 
         camera_pos = theta_rot * phi_rot * camera_pos;
-        camera.gameObject.transform.position = camera_pos;
-        camera.gameObject.transform.LookAt(Vector3.zero);
+        playerCamera.gameObject.transform.position = camera_pos;
+        playerCamera.gameObject.transform.LookAt(Vector3.zero);
 
 
     }
