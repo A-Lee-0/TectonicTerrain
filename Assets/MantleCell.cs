@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using System.Collections;
+using System.Linq;
 //using GlobeLines;
 
 
@@ -12,6 +13,7 @@ public class MantleCell
     public float cosθ;
     Planet planet;
     public Color color;
+    
 
     MantleCellRenderer renderer = null;
 
@@ -19,8 +21,8 @@ public class MantleCell
     Vector3 centroid;
     float area;
 
-    
 
+    public string DebugName;
 
     public MantleCell(Vector2 pos, Planet planet, float strength = 10f) {
         Vector3 position = SphericalToCartesian(planet.radius, pos.x, pos.y);
@@ -37,7 +39,7 @@ public class MantleCell
         SetPosition(pos);
         SetStrength(strength);
 
-        
+        this.DebugName = RandomString(10);
     }
 
 
@@ -92,9 +94,23 @@ public class MantleCell
         else {
             area = 0f;
         }
-        return area;
+        if (area < 0f) { Debug.Log("Warning! Negative area!"); }
+        return Mathf.Abs(area);
     }
 
+
+    public static MantleCell MergeCells(MantleCell cell1, MantleCell cell2) {
+        Vector3 color1 = new Vector3(cell1.color.r, cell1.color.g, cell1.color.b );
+        Vector3 color2 = new Vector3(cell2.color.r, cell2.color.g, cell2.color.b);
+        Vector3 colorNew = Vector3.Slerp(color1, color2, cell1.area / (cell1.area + cell2.area));
+        Vector3 posNew = Vector3.Slerp(cell1.position, cell2.position, cell1.area / (cell1.area + cell2.area));
+
+        cell1.SetPosition(posNew);
+        cell1.color = new Color(colorNew.x, colorNew.y, colorNew.z);
+        cell1.SetStrength(Mathf.Max(cell1.strength, cell2.strength));
+
+        return cell1;
+    }
 
     public static Vector2 CartesianToSpherical(Vector3 cartCoords) {
         Vector2 polar;
@@ -117,4 +133,12 @@ public class MantleCell
     }
 
     
+    private static System.Random random = new System.Random();
+    public static string RandomString(int length) {
+        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        return new string(Enumerable.Repeat(chars, length)
+            .Select(s => s[random.Next(s.Length)]).ToArray());
+    }
+
+
 }

@@ -9,20 +9,17 @@ using GK;       // third party module for calculating the convex hull from a set
 
 
 /*
- * Added basic UI elements to allow player to change target area and speed towards centroid values for cells, and to 
- * choose from different cell respawn, and area calculation methods. Unfortunately the new respawn methods in particular 
- * are quite buggy. Using MTTH cell spawning can easily cause the number of cells to fall too low, causing the ConvexHull 
- * calculator to fail. Using the spawning at near-boundary vertices, to ensure the new cell has a small area, tends to 
- * cause chain spawns in the same spots, causing either the ConvexHull or the subsequent vertex finder to fail. Attempts 
- * to fix it by preventing spawns too close to other vertices then causes it to run out of vertices to try, throw index
- * out of bounds errors...
- * 
+ * Using MTTH cell spawning can easily cause the number of cells to fall too low, causing the ConvexHull calculator 
+ * to fail. It also seems to leave orphaned cellRenderers still showing old meshes - a bug I thought I already fixed
+ * for the non-MTTH methods...
  * 
  * */
 
 public class MantleManager : MonoBehaviour
 {
-    public List<MantleCell> mantleCells;
+    public bool DebugMessages = false;
+
+    List<MantleCell> mantleCells;
     public Planet planet;
 
     public List<LineDrawer> dirLines = new List<LineDrawer>(); // Holds lines from cell circles to the cell's region CoM
@@ -45,13 +42,20 @@ public class MantleManager : MonoBehaviour
     public float targetAreaFactor = 1f;
     public int strengthUpdateMethod = 1;
     public int respawnMethod = 0;
+    public float mergeAngRadius = 0.035f;
 
 
     public float respawnMTTH = 5f; // Mean Time To Happen for cell spawns in seconds.
     public float defaultRespawnStrength = 0.01f;
+    List<MantleCell> cellsToRespawnNextFrame = new List<MantleCell>(); // Holds list of cells that failed to respawn on a previous frame(s). Try to respawn this frame!
+    List<MantleCell> cellsToTryRespawning = new List<MantleCell>();    // Holds list of cells that went to zero area this frame. May or may not try to respawn, depending on respawn method.
 
     public List<MantleCellRenderer> unassignedMantleCellRenderers;
 
+
+    public int debugNumCellsWaitingToSpawn = 0;
+    public MantleCellRenderer[] debugCellsWaitingToSpawn;
+    public string[] debugCellNames;
 
     int lastColor = 0;
 
@@ -160,45 +164,126 @@ public class MantleManager : MonoBehaviour
     public void DoUpdate() {
         respawnsThisFrame = 0;  // reset this so respawn indices are correct
         RecalculateVertexScoreRankings();
+        Debug.Log("Debug maintainance");
         DebugIntersections = planetIntersectionVertices.ToArray();
         DebugScores = planetIntersectionVertexScores.ToArray();
+        debugNumCellsWaitingToSpawn = cellsToRespawnNextFrame.Count;
+        debugCellsWaitingToSpawn = new MantleCellRenderer[debugNumCellsWaitingToSpawn];
+        for(int i = 0; i < debugNumCellsWaitingToSpawn; i++) {
+            debugCellsWaitingToSpawn[i] = cellsToRespawnNextFrame[i].Renderer;
+        }
+        debugCellNames = new string[mantleCells.Count];
+        for (int i = 0; i < mantleCells.Count; i++) {
+            debugCellNames[i] = mantleCells[i].DebugName;
+        }
 
-//        Debug.Log("Smallest At: " + vertsNear1[0]);
-//        Debug.DrawRay(Vector3.zero, vertsNear1[0] * 5, Color.white);
+        //        Debug.Log("Smallest At: " + vertsNear1[0]);
+        //        Debug.DrawRay(Vector3.zero, vertsNear1[0] * 5, Color.white);
 
         // 1a. Moves all MantleCells towards their region CoM, and changes radius depending on it's current area.
         // TODO: maybe make this more interesting? As is, once a cell's circle is slightly offset from its region, it begins a suicide charge away from itself.S
 
+
+        Debug.Log("Moving Cells");
         float targetStr = 0f;
         MantleCell cellToMove;
-        for (int i = 0; i< mantleCells.Count; i++) {
-            cellToMove = mantleCells[i];
+
+        for (int i = mantleCells.Count; i > 0; i--) {
+            cellToMove = mantleCells[i-1];
             if (cellToMove.HasRegion && cellToMove.Area > 0.01f) {
                 targetStr = CalculateNewCellStrength(cellToMove, this.targetAreaFactor);
                 cellToMove.SetPosition(Vector3.SlerpUnclamped(cellToMove.PlanetPosition, cellToMove.Centroid, this.centroidAttraction * 0.1f));
                 cellToMove.SetStrength(Mathf.Lerp(cellToMove.strength, targetStr, 0.1f));
-
             }
             //  b. Moves MantleCells without a region to a new location.
             else {
-                // TODO: Make this more interesting than just a random point. Ideally want to identify points that are natually bounded, e.g. intersection of two circles
-                // could work with cell colour, and have the new region be the average colour - it's 'budded' from the parents.
-                // or could just have bud be one parent colour, and have it be a 'colony'
-                RespawnCell(cellToMove);
+                // move actual respawning outside of cell movement loop, to ensure all moves are done before respawns attempted.
+                // Otherwise could spawn in a valid location (i.e. not too close to another cell), then have another cell move on top of it.
+                MyLog("Respawning cell due to 0 area:" + cellToMove.DebugName);
+                cellsToTryRespawning.Add(cellToMove);
+                mantleCells.Remove(cellToMove);
             }
         }
 
-        // Spawn new cells for MTTH spawning
-        // Probability of at least 1 event in time dt = 1 - e^(-dt/MTTH)
-        if(UnityEngine.Random.value > Mathf.Exp(-Time.deltaTime / respawnMTTH)) {
+
+        Debug.Log("Merging Cells");
+        // Merge cells that are too close too each other.
+        float testValue = 1f - (mergeAngRadius * mergeAngRadius / 2);  //small angle approximation
+        for (int i = mantleCells.Count; i > 0; i--) {
+            MantleCell cell_i = mantleCells[i-1];
+            bool removedCell_i = false;
+            for (int j = i-1; j > 0; j--) {
+                if (!removedCell_i) { // don't try to merge a cell with a cell that is already marked for removal!
+                    MantleCell cell_j = mantleCells[j-1];
+                    if (Vector3.Dot(cell_j.PlanetPosition.normalized, cell_i.PlanetPosition.normalized) > testValue) {
+                        MyLog("Merging cells " + i + " and " + j + ", " + cell_i.DebugName + " " + cell_j.DebugName);
+                        MantleCell.MergeCells(cell_j, cell_i);
+                        cellsToTryRespawning.Add(cell_i);
+                        mantleCells.Remove(cell_i);
+                        removedCell_i = true;
+                    }
+                }
+            }
+        }
+
+        //  b. Moves MantleCells without a region to a new location.
+        //    i.  Try to respawn cells that failed to respawn in previous frames.
+        //    ii. Try to respawn cells that were lost this frame (or delete them depending on respawnMethod).
+        //    iii.Try to spawn new cells based on the MTTH.
+
+        // TODO: Make this more interesting than just a random point. Ideally want to identify points that are natually bounded, e.g. intersection of two circles
+        // could work with cell colour, and have the new region be the average colour - it's 'budded' from the parents.
+        // or could just have bud be one parent colour, and have it be a 'colony'
+
+
+        Debug.Log("Respawning old cells: " + cellsToRespawnNextFrame.Count);
+        // b. i. Try to respawn cells that failed to respawn in previous frames.
+        int numCellsToTry = cellsToRespawnNextFrame.Count; // extract count first, as failed cells will get readded to the end of the list...
+        for (int i = 0; i < numCellsToTry; i++) {
+            MantleCell cell = cellsToRespawnNextFrame[0];  
+            cellsToRespawnNextFrame.RemoveAt(0);           // Remove cell from list. If it fails again, RespawnCell() will add it back to the end of the list.
+            if (cell == null) { RespawnCell(); }
+            else {
+                MantleCell newCell = RespawnCell(cell);
+                MyLog("Trying to respawning cell " + cell.DebugName);
+                if (!(newCell == null)) { mantleCells.Add(cell); }
+            }
+        }
+
+        Debug.Log("Respawning freshly lost cells: " + cellsToTryRespawning.Count);
+        // b. ii. Try to respawn cells that were lost this frame (or delete them depending on respawnMethod).
+        for (int i = 0; i < cellsToTryRespawning.Count; i++) {
+            MantleCell newCell = RespawnCell(cellsToTryRespawning[i]);
+            MyLog("Trying to respawning cell " + cellsToTryRespawning[i].DebugName);
+            if (!(newCell == null)) { mantleCells.Add(cellsToTryRespawning[i]); }
+        }
+        cellsToTryRespawning.Clear();
+
+
+        Debug.Log("Creating new cells");
+        // b. iii. Try to spawn new cells based on the MTTH.
+        // Probability of at least 1 event in time dt = 1 - e^(-dt/MTTH)  i.e. look for random > e^(-dt/MTTH).
+        if (UnityEngine.Random.value > Mathf.Exp(-Time.deltaTime / respawnMTTH)) {
             //spawn a new cell
             MantleCell newCell = RespawnCell();
-            if (!(newCell == null)) { mantleCells.Add(RespawnCell()); }
+            //if (!(newCell == null)) { mantleCells.Add(newCell); }         Already adding the cell to the list inside RespawnCell for new cells - this will create duplicates.
             
+        }
+
+
+        Debug.Log("Debug maintainance 2");
+        List<MantleCell> debugDupeCells = new List<MantleCell>();
+        for (int i = 0; i < mantleCells.Count; i++) {
+            MantleCell cell = mantleCells[i];
+            if (debugDupeCells.Contains(cell)) {
+                Debug.LogError("Duplicate cell detected: " + cell.DebugName);
+            }
+            debugDupeCells.Add(cell);
         }
 
         //Debug.Log("Strengths this frame:");
         foreach (var cell in mantleCells) {
+//            Debug.Log("Cell is null?" + (cell == null));
             if (cell.HasRenderer) {
                 cell.Renderer.debugArea = cell.Area;
                 //Debug.Log("cell strength: " + cell.strength);
@@ -221,19 +306,13 @@ public class MantleManager : MonoBehaviour
         DrawLinesToCoM(mantleCells);
 
 
-
+        Debug.Log("Make Meshes");
         // Make surface meshes for each cell
         int surfaceResolution = 10; 
         foreach (var cell in mantleCells) {
             cell.Renderer.MakeMesh(surfaceResolution);
             cell.Renderer.SetMeshColor(cell.color);
         }
-
-        // Moved Into loop above, using saved color on each cell. Useful for genetics down the road maybe.
-        //for (int i = 0; i < mantleCells.Count; i++) {
-        //    mantleCells[i].Renderer.SetMeshColor(region_colors[i % region_colors.Length]);
-        //}
-
     }
 
 
@@ -246,38 +325,68 @@ public class MantleManager : MonoBehaviour
 
     int respawnsThisFrame = 0;
     MantleCell RespawnCell(MantleCell cell) {       // used for cell-by-cell respawns (i.e. instant)
+        bool checkingVertex = false;
         switch (respawnMethod) {
-            case 0:
+            case 0: // 0, "Random, Instant" 
                 Vector3 newPos = UnityEngine.Random.onUnitSphere;
-                while (SpawnIsTooCloseToAnotherCell(newPos)){
-                    Debug.Log("Retry respawn - random location too close to another cell! Trying again...");
+                while (SpawnIsTooCloseToAnotherCell(newPos, mergeAngRadius)){
+                    MyLog("Retry respawn - random location too close to another cell! Trying again...");
                     respawnsThisFrame += 1;
                     newPos = UnityEngine.Random.onUnitSphere;
                 }
-                Debug.Log("Respawned: " + respawnMethods[0]);
+                MyLog("Respawned: " + respawnMethods[0]);
                 cell.SetPosition(newPos);
                 cell.SetStrength(defaultRespawnStrength);
+                cell.color = GetNextColor();
                 respawnsThisFrame += 1;
                 return cell;
-            case 1:
-                while (SpawnIsTooCloseToAnotherCell(vertsNear1[respawnsThisFrame])){
-                    Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+            case 1: // 1, "At ~1 score vertex, Instant"
+                checkingVertex = true;
+                while (checkingVertex && respawnsThisFrame < planetIntersectionVertices.Count) {
+                    if (SpawnIsTooCloseToAnotherCell(vertsNear1[respawnsThisFrame], mergeAngRadius)) {
+                        //Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+                        respawnsThisFrame += 1;
+                    }
+                    else { checkingVertex = false; }      // Found target vertex that is valid.
+                }
+                if (respawnsThisFrame < planetIntersectionVertices.Count) { // if a vertex to spawn the cell at is found
+                    MyLog("Respawned: " + respawnMethods[1] + " at: " + vertsNear1[respawnsThisFrame] + "using index: " + respawnsThisFrame);
+                    cell.SetPosition(vertsNear1[respawnsThisFrame]);
+                    cell.SetStrength(defaultRespawnStrength);
+                    cell.color = GetNextColor();
                     respawnsThisFrame += 1;
                 }
-                Debug.Log("Respawned: " + respawnMethods[1] + " at: " + vertsNear1[respawnsThisFrame] + "using index: " + respawnsThisFrame);
-                cell.SetPosition(vertsNear1[respawnsThisFrame]);
-                cell.SetStrength(defaultRespawnStrength);
-                respawnsThisFrame += 1;
+                else {
+                    MyLog("Unable to find valid location to spawn cell - try again next frame.");
+                    cellsToRespawnNextFrame.Add(cell);
+                    mantleCells.Remove(cell);
+                    cell.Renderer.Reset(cell, Array.Empty<Vector3>());
+                    return null;        // return null, as respawn failed.
+                }
                 return cell;
-            case 2:
-                while (SpawnIsTooCloseToAnotherCell(vertsLargest[respawnsThisFrame])) {
-                    Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+            case 2: // 2, "At most score vertex, Instant"
+                checkingVertex = true;
+                while (checkingVertex && respawnsThisFrame < planetIntersectionVertices.Count) {
+                    if (SpawnIsTooCloseToAnotherCell(vertsLargest[respawnsThisFrame], mergeAngRadius)) {
+                        //Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+                        respawnsThisFrame += 1;
+                    }
+                    else { checkingVertex = false; }      // Found target vertex that is valid.
+                }
+                if (respawnsThisFrame < planetIntersectionVertices.Count) { // if a vertex to spawn the cell at is found
+                    MyLog("Respawned: " + respawnMethods[2]);
+                    cell.SetPosition(vertsLargest[respawnsThisFrame]);
+                    cell.SetStrength(defaultRespawnStrength);
+                    cell.color = GetNextColor();
                     respawnsThisFrame += 1;
                 }
-                Debug.Log("Respawned: " + respawnMethods[2]);
-                cell.SetPosition(vertsLargest[respawnsThisFrame]);
-                cell.SetStrength(defaultRespawnStrength);
-                respawnsThisFrame += 1;
+                else {
+                    MyLog("Unable to find valid location to spawn cell - try again next frame.");
+                    cellsToRespawnNextFrame.Add(cell);
+                    mantleCells.Remove(cell);
+                    cell.Renderer.Reset(cell, Array.Empty<Vector3>());
+                    return null;        // return null, as respawn failed.
+                }
                 return cell;
             default: // If not doing one of the above, then delete the cell.
                 Debug.Log("Deleting cell");
@@ -290,44 +399,65 @@ public class MantleManager : MonoBehaviour
     }
     MantleCell RespawnCell() {                  // used for update-wide respawns (i.e. non-instant)
         MantleCell newCell;
+        bool checkingVertex = false;
         switch (respawnMethod) {
-            case 3:
+            case 3: // 3, "Random, MTTH  (Poisson)"
                 Vector3 newPos = UnityEngine.Random.onUnitSphere;
-                while (SpawnIsTooCloseToAnotherCell(newPos)) {
-                    Debug.Log("Retry respawn - random location too close to another cell! Trying again...");
+                while (SpawnIsTooCloseToAnotherCell(newPos, mergeAngRadius)) {
+                    MyLog("Retry respawn - random location too close to another cell! Trying again...");
                     respawnsThisFrame += 1;
                     newPos = UnityEngine.Random.onUnitSphere;
                 }
-                Debug.Log("Respawned: " + respawnMethods[3]);
+                MyLog("Respawned: " + respawnMethods[3]);
                 newCell = new MantleCell(newPos, this.planet, defaultRespawnStrength);
                 mantleCells.Add(newCell);
-                newCell.color = region_colors[lastColor];
-                lastColor = (lastColor + 1) % region_colors.Length;
+                newCell.color = GetNextColor();
                 respawnsThisFrame += 1;
                 return newCell;
-            case 4:
-                while (SpawnIsTooCloseToAnotherCell(vertsNear1[respawnsThisFrame])) {
-                    Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+            case 4: // 4, "At ~1 score vertex, MTTH"
+                checkingVertex = true;
+                while (checkingVertex && respawnsThisFrame < planetIntersectionVertices.Count) {
+                    if (SpawnIsTooCloseToAnotherCell(vertsNear1[respawnsThisFrame], mergeAngRadius)) {
+                        //Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+                        respawnsThisFrame += 1;
+                    }
+                    else { checkingVertex = false; }      // Found target vertex that is valid.
+                }
+                if(respawnsThisFrame < planetIntersectionVertices.Count) { // if a vertex to spawn the cell at is found
+                    MyLog("Respawned: " + respawnMethods[4]);
+                    newCell = new MantleCell(vertsNear1[respawnsThisFrame], this.planet, defaultRespawnStrength);
+                    mantleCells.Add(newCell);
+                    newCell.color = GetNextColor();
                     respawnsThisFrame += 1;
                 }
-                Debug.Log("Respawned: " + respawnMethods[4]);
-                newCell = new MantleCell(vertsNear1[respawnsThisFrame], this.planet, defaultRespawnStrength);
-                mantleCells.Add(newCell);
-                newCell.color = region_colors[lastColor];
-                lastColor = (lastColor + 1) % region_colors.Length;
-                respawnsThisFrame += 1;
+                else {
+                    MyLog("Unable to find valid location to spawn cell - try again next frame.");
+                    newCell = null;
+                    cellsToRespawnNextFrame.Add(newCell);
+                }
+                
                 return newCell;
-            case 5:
-                while (SpawnIsTooCloseToAnotherCell(vertsLargest[respawnsThisFrame])) {
-                    Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+            case 5: // 5, "At most score vertex, MTTH"
+                checkingVertex = true;
+                while (checkingVertex && respawnsThisFrame < planetIntersectionVertices.Count) {
+                    if (SpawnIsTooCloseToAnotherCell(vertsLargest[respawnsThisFrame], mergeAngRadius)) {
+                        //Debug.Log("Retry respawn - index " + respawnsThisFrame + "too close to another cell! Trying again...");
+                        respawnsThisFrame += 1;
+                    }
+                    else { checkingVertex = false; }      // Found target vertex that is valid.
+                }
+                if (respawnsThisFrame < planetIntersectionVertices.Count) { // if a vertex to spawn the cell at is found
+                    MyLog("Respawned: " + respawnMethods[5]);
+                    newCell = new MantleCell(vertsLargest[respawnsThisFrame], this.planet, defaultRespawnStrength);
+                    mantleCells.Add(newCell);
+                    newCell.color = GetNextColor();
                     respawnsThisFrame += 1;
                 }
-                Debug.Log("Respawned: " + respawnMethods[5]);
-                newCell = new MantleCell(vertsLargest[respawnsThisFrame], this.planet, defaultRespawnStrength);
-                mantleCells.Add(newCell);
-                newCell.color = region_colors[lastColor];
-                lastColor = (lastColor + 1) % region_colors.Length;
-                respawnsThisFrame += 1;
+                else {
+                    MyLog("Unable to find valid location to spawn cell - try again next frame.");
+                    newCell = null;
+                    cellsToRespawnNextFrame.Add(newCell);
+                }
                 return newCell;
             default:
                 return null;
@@ -370,8 +500,8 @@ public class MantleManager : MonoBehaviour
         Array.Sort(scoreNear1, vertsNear1);
     }
 
-    bool SpawnIsTooCloseToAnotherCell(Vector3 proposedSpawn, float threshold = 0.0006f) {// approx. within 2 degress -> fail.
-        float limit = 1f - threshold;   
+    bool SpawnIsTooCloseToAnotherCell(Vector3 proposedSpawn, float threshold = 0.01f) {// approx. within 2 degress -> fail.
+        float limit = 1f - threshold * threshold / 2;  //small angle approximation
         Vector3 norm = proposedSpawn.normalized;
         foreach (var cell in mantleCells) {
             if( Vector3.Dot(norm, cell.PlanetPosition.normalized) > limit) {
@@ -601,6 +731,12 @@ public class MantleManager : MonoBehaviour
 
     }
 
+    Color GetNextColor() {
+        Color newColor = region_colors[lastColor];
+        lastColor = (lastColor + 1) % region_colors.Length;
+        return newColor;
+    }
+
     public (int[],List<Vector3>) FindDualConvexHull(MantleCell[] cells) {
 
 
@@ -650,6 +786,11 @@ public class MantleManager : MonoBehaviour
 
 
 
+    public void MyLog(string message) {
+        if (this.DebugMessages) {
+            Debug.Log(message);
+        }
+    }
     
 
 
@@ -663,14 +804,16 @@ public class MantleManager : MonoBehaviour
     /// <param name="intersectionPoint"></param>
     /// <returns></returns>
     private bool PlanesIntersectAtSinglePoint(Plane p0, Plane p1, Plane p2, out Vector3 intersectionPoint) {
-        const float EPSILON = 1e-4f;
-
+        const float EPSILON = 1e-6f;
+        
         var det = Vector3.Dot(Vector3.Cross(p0.normal, p1.normal), p2.normal);
-        if (Mathf.Abs(det) < EPSILON) {
+        // removing this code has made the system way less likely to error and return invalid points.
+        // TODO: figure out a way of handling potential error cases better than this...
+        /*if (Mathf.Abs(det) < EPSILON) {
             intersectionPoint = Vector3.zero;
             return false;
         }
-
+        */
         intersectionPoint =
             (-(p0.distance * Vector3.Cross(p1.normal, p2.normal)) -
             (p1.distance * Vector3.Cross(p2.normal, p0.normal)) -

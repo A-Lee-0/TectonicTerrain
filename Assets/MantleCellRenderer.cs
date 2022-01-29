@@ -12,7 +12,7 @@ public class MantleCellRenderer : MonoBehaviour
     /// <summary>
     /// The MantleCell to be rendered
     /// </summary>
-    MantleCell cell;
+    public MantleCell cell;
     /// <summary>
     /// Array of vertices comprising the boundary of the MantleCell.
     /// </summary>
@@ -33,6 +33,9 @@ public class MantleCellRenderer : MonoBehaviour
     public Mesh lineMesh;
 
     public float debugArea;
+    public bool debugHasCell;
+    public string debugCellName;
+    public string debugLastDeathType;
 
     public List<SphericalTriangleMesh> cellSubMeshes = new List<SphericalTriangleMesh>();
     public List<LineDrawer> boundarySubLines = new List<LineDrawer>();
@@ -44,6 +47,14 @@ public class MantleCellRenderer : MonoBehaviour
 
 
         }*/
+
+    private void Update() {
+        debugHasCell = !(this.cell == null);
+        if (!(this.cell == null)) {
+            debugCellName = cell.DebugName;
+        }
+        else { debugCellName = "Null"; }
+    }
 
     public void Setup(MantleCell cell, Vector3[] boundaryVertices) {
         this.cell = cell;
