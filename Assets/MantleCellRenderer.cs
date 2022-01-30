@@ -70,14 +70,24 @@ public class MantleCellRenderer : MonoBehaviour
     }
 
     public void ClearCell() { this.cell = null; }
+    public void ClearVertices() { this.vertices = Array.Empty<Vector3>(); }
 
     public MantleCell Cell => cell;
     public Vector3[] Vertices => vertices;
-    public GameObject LineHolder => lineHolder;
-    public GameObject CircleHolder => circleHolder;
+//    public GameObject LineHolder => lineHolder;
+//    public GameObject CircleHolder => circleHolder;
     public float Area => LineDrawer.Area(vertices, cell.Planet);
     public Vector3 Centroid => LineDrawer.PolygonMoment(Vertices).normalized * cell.Planet.radius;
 
+    public void ClearMeshes() {
+        if (circleHolder == null) { circleHolder = LineDrawer.GetLineHolder(this.gameObject, "circle_holder"); }
+        if (lineHolder == null) { lineHolder = LineDrawer.GetLineHolder(gameObject, "line_holder"); }
+        if (meshHolder == null) { meshHolder = LineDrawer.GetLineHolder(this.gameObject, "mesh_holder"); }
+
+        circleHolder.GetComponent<MeshFilter>().mesh.Clear();
+        lineHolder.GetComponent<MeshFilter>().mesh.Clear();
+        meshHolder.GetComponent<MeshFilter>().mesh.Clear();
+    }
 
     public void DrawCellCircle(Color color, float width = 0.1f) {
         //Debug.Log("dir: " + cell.PlanetPosition + " , strength: " + cell.strength);
