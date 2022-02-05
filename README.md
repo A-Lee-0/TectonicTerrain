@@ -65,3 +65,5 @@ The only way to change the number of cells is to switch to an MTTH spawning, let
 
 1. Use the spherical power diagram as a base for the iterated prisoners dilemma. The radius corresponds to average score. Score weight from game with each neighbour depends on arc length of edge 
 
+2. Tectonic Terrain generation, as originally planned.
+
