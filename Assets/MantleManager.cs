@@ -617,11 +617,6 @@ public class MantleManager : MonoBehaviour
         int[] cellIntersections; List<Vector3> normals;
         (cellIntersections, normals) = FindDualConvexHull(cells);
 
-        /*
-        Debug.Log("Program found " + cellIntersections.Length + " intersections");
-        for (int i = 0; i < cellIntersections.Length; i++) {
-            Debug.Log("Intersection " + i + ": " + cellIntersections[i]);
-        }*/
 
         List <Vector3>[] cellPoints = new List<Vector3>[cells.Length];
         for (int i = 0; i < cells.Length;i++){ cellPoints[i] = new List<Vector3>(); }
@@ -725,7 +720,7 @@ public class MantleManager : MonoBehaviour
 
         var calc = new ConvexHullCalculator();
         var verts = new List<Vector3>();
-        var vertMap = new List<int>();      // Added by ALee. For each vertex added to verts, keeps track of it's original index in dualVertices.
+        var vertMap = new List<int>();      // Added by ALee. For each vertex added to verts, keeps track of it's original index in dualVertices. I.e. which MantleCell it is from.
         var tris = new List<int>();
         var normals = new List<Vector3>();
         
@@ -736,7 +731,7 @@ public class MantleManager : MonoBehaviour
         var cellIntersections = new int[tris.Count];
 
         for (int i = 0; i<tris.Count; i++) {
-            cellIntersections[i] = vertMap[tris[i]];
+            cellIntersections[i] = vertMap[tris[i]];    // create array of faces in dual space, with the index for each point referring to the cell index in MantleCell[] cells.
         }
 
         return (cellIntersections,normals);
