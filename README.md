@@ -2,18 +2,20 @@
 ## What Is This?
 This project started as an attempt to make a tectonic plate driven terrain generator, hence the repository name.
 
-However, it fairly quickly got side-tracked by my discovery of the Power Diagram, and its extension to the surface of a sphere, as detailed in [this paper](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.95.3444&rep=rep1&type=pdf).
+However, it fairly quickly got side-tracked by my discovery of the Power Diagram, and its extension to the surface of a sphere, as detailed in [this paper by K. Sugihara](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.95.3444&rep=rep1&type=pdf).
 Instead, this has become a realtime implementation of the geometry described in the paper, with some user adjustable parameters for the growth, movement and creation of new cells on the sphere.
 
 This has been created using Unity 2021, with custom meshes being created each frame to draw the N-sided spherical-polygon regions associated with each cell.
 
 Computing the location of each corner for a cell's region is hard - a cell's region does not necessarily overlap with its circle, nor circle centre. 
-However, diving the spherical surface into regions can be shown to be equivalent to creating a 3D convex polyhedron where each cell contributes a plane intersecting its circle in 3D space.
+However, dividing the spherical surface into regions can be shown to be equivalent to creating a 3D convex polyhedron where each cell contributes a plane intersecting its circle in 3D space.
 These polyhedron edges can be projected onto the surface of the sphere to show the cell boundaries.
 
 However, it can be made more efficient still by building the convex hull of the polyhedron's dual - i.e. for each polyhedron face, the dual has a vertex, and each polyhedron vertex has a dual face.
 The dual-space vertices are easily calculated from the cell centres and radii, allowing the dual-space polyhedron to be computed more easily than its real-space counterpart.
 The vertices on each dual-space face then tell us which real-space cells intersect to form it, which can then be used to compute the real-space intersection position.
+
+[Many thanks to Oskar Sigvardsson for their implementation of the Quickhull algorithm in Unity C#](https://github.com/OskarSigvardsson/unity-quickhull/blob/master/Scripts/ConvexHullCalculator.cs).
 
 ## Problems.
 There remain some problems with the code.
