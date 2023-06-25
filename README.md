@@ -1,5 +1,5 @@
 # TectonicTerrain
-![Short example of project in Unity.](Images/demo.gif)
+![Short example of project in Unity.](Images/demo2.gif)
 
 ## What Is This?
 This project started as an attempt to make a tectonic plate driven terrain generator, hence the repository name.
